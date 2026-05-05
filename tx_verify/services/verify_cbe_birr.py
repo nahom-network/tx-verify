@@ -5,7 +5,8 @@ Translated from src/services/verifyCBEBirr.ts
 
 import io
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 
 import httpx
 from pypdf import PdfReader
@@ -15,7 +16,11 @@ from tx_verify.utils.logger import logger
 
 @dataclass
 class CBEBirrReceipt:
-    """CBE Birr receipt data."""
+    """CBE Birr receipt data.
+
+    Core fields that appear consistently on every receipt.
+    Variable / optional fields are collected in ``meta``.
+    """
 
     customer_name: str = ""
     debit_account: str = ""
@@ -23,7 +28,6 @@ class CBEBirrReceipt:
     receiver_name: str = ""
     order_id: str = ""
     transaction_status: str = ""
-    reference: str = ""
     receipt_number: str = ""
     transaction_date: str = ""
     amount: str = ""
@@ -33,6 +37,7 @@ class CBEBirrReceipt:
     total_paid_amount: str = ""
     payment_reason: str = ""
     payment_channel: str = ""
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -94,71 +99,206 @@ async def verify_cbe_birr(receipt_number: str, phone_number: str) -> CBEBirrRece
         )
 
 
-def _extract_value(text: str, pattern: re.Pattern[str]) -> str:
-    m = pattern.search(text)
-    result = m.group(1).strip() if m else ""
-    return re.sub(r"\s{2,}", " ", result.replace("\n", " "))
-
-
 def _parse_cbe_birr_receipt(pdf_text: str) -> CBEBirrReceipt | None:
-    """Parse CBE Birr receipt fields from extracted PDF text."""
+    """Parse CBE Birr receipt fields from extracted PDF text.
+
+    Uses a robust line-by-line scanner that works with the sparse
+    layout produced by pypdf.
+    """
     try:
         logger.info("[CBEBirr] Starting PDF text parsing...")
 
-        customer_name = _extract_value(
-            pdf_text, re.compile(r"Sub city:[\s\n]+([A-Z\s]+?)[\s\n]+Wereda/kebele:", re.I)
-        )
+        lines = [ln.strip() for ln in pdf_text.split("\n")]
 
-        debit_m = re.search(r"Debit Account\s*([\s\S]*?)(?=\s*Credit Account)", pdf_text, re.I)
-        debit_account = debit_m.group(1).replace("\n", " ").strip() if debit_m else ""
+        # ------------------------------------------------------------------
+        # Labels that are guaranteed to be structural, never receipt values.
+        # ------------------------------------------------------------------
+        known_labels = {
+            "Commercial Bank of Ethiopia",
+            "VAT Invoice/ Customer Receipt",
+            "CBEBirr",
+            "Company Address & Other Information",
+            "Customer Information",
+            "Country:",
+            "City:",
+            "Address:",
+            "Postal code:",
+            "SWIFT Code:",
+            "Email:",
+            "Tel:",
+            "Fax:",
+            "TIN",
+            "VAT Invoice No:",
+            "VAT Registration No:",
+            "VAT Registration Date:",
+            "Customer Name:",
+            "Region:",
+            "Sub city:",
+            "Wereda/kebele:",
+            "TIN (TAX ID):",
+            "Transaction Information",
+            "Debit Account",
+            "Credit Account",
+            "Receiver Name",
+            "Order ID",
+            "Transaction Status",
+            "Reference",
+            "Transaction Details",
+            "Receipt Number",
+            "Transaction Date",
+            "Amount",
+            "Paid amount",
+            "Service Charge",
+            "VAT",
+            "Total Paid Amount",
+            "Total Amount in word",
+            "Payment Reason",
+            "Payment Channel",
+            "Branch:",
+            "Tip",
+            "The Bank you can always rely on!",
+            f"© {datetime.now().year} Commercial Bank of Ethiopia. All rights reserved",
+        }
 
-        credit_account = _extract_value(
-            pdf_text, re.compile(r"Credit Account\s*([\s\S]*?)(?=\s*Receiver Name)", re.I)
-        )
-        receiver_name = _extract_value(
-            pdf_text, re.compile(r"Receiver Name\s*([\s\S]*?)(?=\s*Order ID)", re.I)
-        )
+        def _next_value(start_idx: int) -> str:
+            """Return the next non-empty line that is not a known label."""
+            j = start_idx
+            while j < len(lines):
+                val = lines[j].strip()
+                if val and val not in known_labels:
+                    return val
+                j += 1
+            return ""
 
-        order_id = _extract_value(pdf_text, re.compile(r"Order ID\s*([A-Z0-9]+)", re.I))
-        transaction_status = _extract_value(
-            pdf_text, re.compile(r"Transaction Status\s*([a-zA-Z]+)", re.I)
-        )
+        # ---- individual fields ------------------------------------------------
+        customer_name = ""
+        debit_account = ""
+        credit_account = ""
+        receiver_name = ""
+        order_id = ""
+        transaction_status = ""
+        reference = ""
+        receipt_number = ""
+        transaction_date = ""
+        amount = ""
+        paid_amount = ""
+        service_charge = ""
+        vat = ""
+        total_paid_amount = ""
+        total_amount_in_word = ""
+        payment_reason = ""
+        payment_channel = ""
+        branch = ""
+        tip = ""
 
-        ref_m = re.search(
-            r"Reference[\s:]*(.*?)(?=\s*(?:Transaction Details|Receipt Number|\u12e8\u12a2\u1275\u12ee\u1335\u12eb|Commercial Bank))",
-            pdf_text,
-            re.I | re.S,
-        )
-        reference = ref_m.group(1).replace("\n", " ").strip() if ref_m else ""
-        reference = re.sub(r"^[\s:]+|[\s:]+$", "", reference)
+        i = 0
+        while i < len(lines):
+            line = lines[i]
 
-        receipt_m = re.search(r"([A-Z0-9]{10})(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})([\d.]+)", pdf_text)
-        receipt_number = receipt_m.group(1) if receipt_m else ""
-        transaction_date = receipt_m.group(2) if receipt_m else ""
-        amount = receipt_m.group(3) if receipt_m else ""
+            # Customer name appears on the line immediately after "Sub city:"
+            if line == "Sub city:":
+                customer_name = _next_value(i + 1)
 
-        financial_m = re.search(
-            r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+Paid amount", pdf_text, re.I
-        )
-        paid_amount = financial_m.group(1) if financial_m else ""
-        service_charge = financial_m.group(2) if financial_m else ""
-        vat = financial_m.group(3) if financial_m else ""
-        total_paid_amount = financial_m.group(4) if financial_m else ""
+            # Single-line labelled values
+            elif line == "Debit Account":
+                debit_account = _next_value(i + 1)
 
-        payment_m = re.search(
-            r"Payment Channel[\s\n]+([^\n]+)[\s\n]+([^\n]+)[\s\n]+([^\n]+)", pdf_text, re.I
-        )
-        payment_reason = payment_m.group(2).strip() if payment_m else ""
-        payment_channel = payment_m.group(3).strip() if payment_m else ""
+            elif line == "Credit Account":
+                credit_account = _next_value(i + 1)
 
-        receipt = CBEBirrReceipt(
+            elif line == "Receiver Name":
+                receiver_name = _next_value(i + 1)
+
+            elif line == "Order ID":
+                order_id = _next_value(i + 1)
+
+            elif line == "Transaction Status":
+                transaction_status = _next_value(i + 1)
+
+            elif line == "Reference":
+                raw_ref = _next_value(i + 1)
+                reference = raw_ref.rstrip(":").strip() if raw_ref else ""
+
+            # Transaction Details block:
+            #  Receipt Number   Transaction Date   Amount
+            #  <receipt>        <date>             <amount>
+            #  <paid>           <service>          <vat>    <total>
+            #  Paid amount      Service Charge     VAT      Total Paid Amount
+            elif "Receipt Number" in line and "Transaction Date" in line and "Amount" in line:
+                j = i + 1
+                vals = []
+                while j < len(lines) and len(vals) < 3:
+                    val = lines[j].strip()
+                    if val and val not in known_labels:
+                        vals.append(val)
+                    j += 1
+                if len(vals) >= 3:
+                    receipt_number = vals[0]
+                    transaction_date = vals[1]
+                    amount = vals[2]
+
+                # Financial breakdown: 4 consecutive numeric values
+                fin_vals = []
+                while j < len(lines) and len(fin_vals) < 4:
+                    val = lines[j].strip()
+                    if re.match(r"^[\d.]+$", val):
+                        fin_vals.append(val)
+                    elif val in known_labels:
+                        break
+                    j += 1
+                if len(fin_vals) >= 4:
+                    paid_amount = fin_vals[0]
+                    service_charge = fin_vals[1]
+                    vat = fin_vals[2]
+                    total_paid_amount = fin_vals[3]
+
+            # Bottom block: Total Amount in word, Payment Reason, Payment Channel
+            # Each label is followed by a value. The values are collected in order.
+            elif line == "Total Amount in word":
+                j = i + 1
+                vals = []
+                while j < len(lines) and len(vals) < 3:
+                    val = lines[j].strip()
+                    if val and val not in known_labels:
+                        vals.append(val)
+                    j += 1
+                if len(vals) >= 3:
+                    total_amount_in_word = vals[0]
+                    payment_reason = vals[1]
+                    payment_channel = vals[2]
+
+            # Optional fields at the very bottom
+            elif line == "Branch:":
+                branch = _next_value(i + 1)
+
+            elif line == "Tip":
+                tip = _next_value(i + 1)
+
+            i += 1
+
+        # ---- validate we got the essentials ----------------------------------
+        if not customer_name and not receipt_number and not amount:
+            logger.warning("[CBEBirr] No essential fields found in PDF")
+            return None
+
+        # ---- assemble meta dict for optional/variable fields -----------------
+        meta: dict[str, str] = {}
+        if reference:
+            meta["reference"] = reference
+        if total_amount_in_word:
+            meta["total_amount_in_word"] = total_amount_in_word
+        if branch and branch != "0.00":
+            meta["branch"] = branch
+        if tip and tip != "0.00":
+            meta["tip"] = tip
+
+        return CBEBirrReceipt(
             customer_name=customer_name,
             debit_account=debit_account,
             credit_account=credit_account,
             receiver_name=receiver_name,
             order_id=order_id,
             transaction_status=transaction_status,
-            reference=reference,
             receipt_number=receipt_number,
             transaction_date=transaction_date,
             amount=amount,
@@ -168,13 +308,8 @@ def _parse_cbe_birr_receipt(pdf_text: str) -> CBEBirrReceipt | None:
             total_paid_amount=total_paid_amount,
             payment_reason=payment_reason,
             payment_channel=payment_channel,
+            meta=meta,
         )
-
-        if not customer_name and not receipt_number and not amount:
-            logger.warning("[CBEBirr] No essential fields found in PDF")
-            return None
-
-        return receipt
 
     except Exception as e:
         logger.error("[CBEBirr] Error parsing PDF text: %s", e)
