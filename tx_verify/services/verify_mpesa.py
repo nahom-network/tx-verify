@@ -46,9 +46,7 @@ def _title_case(s: str) -> str:
 
 def _clean_amharic(text: str) -> str:
     """Strip Ethiopic/Amharic characters from extracted text."""
-    return re.sub(
-        r"[\u1200-\u137F\u1380-\u139F\u2D80-\u2DDF\uAB00-\uAB2F]+", " ", text
-    ).strip()
+    return re.sub(r"[\u1200-\u137F\u1380-\u139F\u2D80-\u2DDF\uAB00-\uAB2F]+", " ", text).strip()
 
 
 def _extract_layout_lines(pdf_bytes: bytes) -> list[str]:
@@ -138,9 +136,7 @@ def _parse_receipt_lines(lines: list[str]) -> tuple[dict[str, Any], dict[str, An
             m = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", date_time_str)
             if m:
                 with suppress(ValueError):
-                    data["payment_date"] = datetime.strptime(
-                        m.group(1), "%Y-%m-%d %H:%M:%S"
-                    )
+                    data["payment_date"] = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
 
     # --- Regular label-value pairs ---
     for i, line in enumerate(lines):
@@ -188,6 +184,7 @@ def _parse_receipt_lines(lines: list[str]) -> tuple[dict[str, Any], dict[str, An
 # Public API
 # ---------------------------------------------------------------------------
 
+
 async def _fetch_from_url(url: str, source: str) -> Any:
     logger.info("🔎 Fetching receipt data from %s: %s", source, url)
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -208,7 +205,6 @@ async def verify_mpesa(transaction_id: str) -> MpesaVerifyResult:
         f"https://m-pesabusiness.safaricom.et/api/receipt/getReceipt?trxNo={transaction_id}"
     )
     proxy_key = os.getenv("MPESA_PROXY_KEY", "")
-    fallback_url = f"https://leul.et/mpesa.php?reference={transaction_id}&key={proxy_key}"
     skip_primary = os.getenv("SKIP_PRIMARY_VERIFICATION") == "true"
 
     try:
@@ -218,19 +214,9 @@ async def verify_mpesa(transaction_id: str) -> MpesaVerifyResult:
             try:
                 data = await _fetch_from_url(primary_url, "primary API")
             except Exception as e:
-                logger.warning(
-                    "⚠️ Primary M-Pesa fetch failed: %s. Trying fallback proxy...", e
-                )
+                logger.warning("⚠️ Primary M-Pesa fetch failed: %s. Trying fallback proxy...", e)
         else:
-            logger.info(
-                "⏭️ Skipping primary verifier due to SKIP_PRIMARY_VERIFICATION=true"
-            )
-
-        if not data or data.get("responseCode") != "0" or not data.get("base64Data"):
-            try:
-                data = await _fetch_from_url(fallback_url, "fallback proxy")
-            except Exception as e:
-                logger.error("❌ M-Pesa fallback proxy request failed: %s", e)
+            logger.info("⏭️ Skipping primary verifier due to SKIP_PRIMARY_VERIFICATION=true")
 
         if not data:
             return MpesaVerifyResult(
@@ -245,20 +231,14 @@ async def verify_mpesa(transaction_id: str) -> MpesaVerifyResult:
         )
 
         if data.get("responseCode") == "0" and data.get("base64Data"):
-            logger.info(
-                "✅ API returned success and base64 data. Converting to buffer..."
-            )
+            logger.info("✅ API returned success and base64 data. Converting to buffer...")
             try:
                 pdf_bytes = base64.b64decode(data["base64Data"])
-                logger.info(
-                    "📦 PDF Buffer created (%d bytes). Parsing PDF...", len(pdf_bytes)
-                )
+                logger.info("📦 PDF Buffer created (%d bytes). Parsing PDF...", len(pdf_bytes))
                 return _parse_mpesa_receipt(pdf_bytes)
             except Exception as e:
                 logger.error("❌ Failed to convert/parse base64 PDF: %s", e)
-                return MpesaVerifyResult(
-                    success=False, error=f"Failed to process PDF data: {e}"
-                )
+                return MpesaVerifyResult(success=False, error=f"Failed to process PDF data: {e}")
         else:
             logger.warning("⚠️ M-Pesa returned unsuccessful code or missing data")
             return MpesaVerifyResult(

@@ -3,6 +3,7 @@
 Telebirr receipts are 10-character alphanumeric codes (e.g., "CE12345678").
 The verifier fetches the receipt HTML from Ethio Telecom and parses it.
 """
+
 import asyncio
 
 from tx_verify import verify_telebirr
@@ -10,7 +11,7 @@ from tx_verify import verify_telebirr
 
 async def main() -> None:
     # Replace with a real Telebirr reference number
-    reference = "CE12345678"
+    reference = "CHC15IZ2VZ"
 
     receipt = await verify_telebirr(reference)
 
@@ -29,6 +30,7 @@ async def main() -> None:
     print(f"  Receipt No        : {receipt.receipt_no}")
     print(f"  Payment Date      : {receipt.payment_date}")
     print(f"  Transaction Status: {receipt.transaction_status}")
+    print(f"  META              : {receipt.meta}")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@
 > **CBE Birr**, and **M-Pesa**.
 
 Each verifier fetches the official receipt from the provider (PDF or HTML),
-parses it, and returns typed result objects.  No headless browser is bundled —
+parses it, and returns typed result objects. No headless browser is bundled —
 PDFs are parsed with `pypdf` and HTML with `BeautifulSoup` — so it runs
 anywhere Python does.
 
@@ -16,16 +16,16 @@ anywhere Python does.
 
 ## Supported Providers
 
-| Provider            | Function                | Input (example)                          |
-|---------------------|-------------------------|------------------------------------------|
-| CBE                 | `verify_cbe()`          | `reference="FT…"`, `account_suffix="…"`  |
-| Telebirr            | `verify_telebirr()`     | `reference="CE12345678"`                 |
-| Dashen Bank         | `verify_dashen()`       | `transaction_reference="123…"` (16 dig)  |
-| Bank of Abyssinia   | `verify_abyssinia()`    | `reference="FT…"`, `suffix="…"` (5 dig)  |
-| CBE Birr            | `verify_cbe_birr()`     | `receipt="…"`, `phone="251…"`            |
-| M-Pesa              | `verify_mpesa()`        | `transaction_id="UE20VG1GS8"`            |
-| Image (Mistral AI)  | `verify_image()`        | `image_bytes`, auto-detects provider     |
-| Universal           | `verify_universal()`    | `reference` — auto-routes by format      |
+| Provider           | Function             | Input (example)                         |
+| ------------------ | -------------------- | --------------------------------------- |
+| CBE                | `verify_cbe()`       | `reference="FT…"`, `account_suffix="…"` |
+| Telebirr           | `verify_telebirr()`  | `reference="CE12345678"`                |
+| Dashen Bank        | `verify_dashen()`    | `transaction_reference="123…"` (16 dig) |
+| Bank of Abyssinia  | `verify_abyssinia()` | `reference="FT…"`, `suffix="…"` (5 dig) |
+| CBE Birr           | `verify_cbe_birr()`  | `receipt="…"`, `phone="251…"`           |
+| M-Pesa             | `verify_mpesa()`     | `transaction_id="UE20VG1GS8"`           |
+| Image (Mistral AI) | `verify_image()`     | `image_bytes`, auto-detects provider    |
+| Universal          | `verify_universal()` | `reference` — auto-routes by format     |
 
 ---
 
@@ -70,17 +70,17 @@ asyncio.run(main())
 See the [`examples/`](examples/) directory for a runnable example per
 provider:
 
-| File | What it shows |
-|------|---------------|
-| [`telebirr.py`](examples/telebirr.py) | Verify a Telebirr receipt by reference number |
-| [`cbe.py`](examples/cbe.py) | Fetch and parse a CBE PDF receipt |
-| [`cbe_birr.py`](examples/cbe_birr.py) | Verify a CBE Birr wallet transaction |
-| [`dashen.py`](examples/dashen.py) | Verify a Dashen Bank receipt with retry logic |
-| [`abyssinia.py`](examples/abyssinia.py) | Verify a Bank of Abyssinia transaction |
-| [`mpesa.py`](examples/mpesa.py) | Verify an Ethiopian M-Pesa transaction |
-| [`image.py`](examples/image.py) | Analyse a receipt image with Mistral Vision AI |
-| [`universal.py`](examples/universal.py) | Let the library auto-route to the right provider |
-| [`error_handling.py`](examples/error_handling.py) | Catch provider-specific errors gracefully |
+| File                                              | What it shows                                    |
+| ------------------------------------------------- | ------------------------------------------------ |
+| [`telebirr.py`](examples/telebirr.py)             | Verify a Telebirr receipt by reference number    |
+| [`cbe.py`](examples/cbe.py)                       | Fetch and parse a CBE PDF receipt                |
+| [`cbe_birr.py`](examples/cbe_birr.py)             | Verify a CBE Birr wallet transaction             |
+| [`dashen.py`](examples/dashen.py)                 | Verify a Dashen Bank receipt with retry logic    |
+| [`abyssinia.py`](examples/abyssinia.py)           | Verify a Bank of Abyssinia transaction           |
+| [`mpesa.py`](examples/mpesa.py)                   | Verify an Ethiopian M-Pesa transaction           |
+| [`image.py`](examples/image.py)                   | Analyse a receipt image with Mistral Vision AI   |
+| [`universal.py`](examples/universal.py)           | Let the library auto-route to the right provider |
+| [`error_handling.py`](examples/error_handling.py) | Catch provider-specific errors gracefully        |
 
 ---
 
@@ -88,8 +88,8 @@ provider:
 
 ### CBE — Commercial Bank of Ethiopia
 
-CBE references are **12 characters** starting with `FT`.  You must supply the
-last **8 digits** of the account number as a suffix.  The bank returns a PDF
+CBE references are **12 characters** starting with `FT`. You must supply the
+last **8 digits** of the account number as a suffix. The bank returns a PDF
 that is fetched and parsed automatically.
 
 ```python
@@ -108,8 +108,8 @@ result = await verify_cbe("FT23062669JJ", "12345678")
 
 ### Telebirr
 
-Telebirr references are **10-character alphanumeric** codes.  The library scrapes
-the public Ethio Telecom receipt page.  It tries the primary source first,
+Telebirr references are **10-character alphanumeric** codes. The library scrapes
+the public Ethio Telecom receipt page. It tries the primary source first,
 then any fallback proxies configured via the `FALLBACK_PROXIES` environment
 variable.
 
@@ -123,7 +123,7 @@ receipt = await verify_telebirr("CE12345678")
 ### Dashen Bank
 
 Dashen references are **16-digit numbers** starting with 3 digits (e.g.
-`1234567890123456`).  The verifier fetches a PDF with built-in retry logic
+`1234567890123456`). The verifier fetches a PDF with built-in retry logic
 (up to 5 attempts).
 
 ```python
@@ -136,7 +136,7 @@ result = await verify_dashen("1234567890123456")
 ### Bank of Abyssinia
 
 Abyssinia references are also **12 characters** starting with `FT`, but the
-suffix is the last **5 digits** of the account number.  The bank returns JSON
+suffix is the last **5 digits** of the account number. The bank returns JSON
 rather than a PDF.
 
 ```python
@@ -148,7 +148,7 @@ result = await verify_abyssinia("FT23062669JJ", "90172")
 
 ### CBE Birr
 
-CBE Birr receipts are **10-character alphanumeric** codes.  You also need the
+CBE Birr receipts are **10-character alphanumeric** codes. You also need the
 wallet phone number in international format (`251…`).
 
 ```python
@@ -160,7 +160,7 @@ result = await verify_cbe_birr("AB1234CD56", "251911234567")
 
 ### M-Pesa
 
-M-Pesa references are **10-character alphanumeric** codes.  The verifier hits
+M-Pesa references are **10-character alphanumeric** codes. The verifier hits
 the Safaricom primary API first, then falls back to a proxy if configured via
 `MPESA_PROXY_KEY`.
 
@@ -204,13 +204,13 @@ print(info.verified, info.details)
 Hand any reference to `verify_universal()` and it routes to the correct provider
 based on length and prefix:
 
-| Reference format | Routed to |
-|------------------|-----------|
-| 16 digits starting with `3` | Dashen Bank |
-| 12 chars starting with `FT` + 8-digit suffix | CBE |
+| Reference format                             | Routed to         |
+| -------------------------------------------- | ----------------- |
+| 16 digits starting with `3`                  | Dashen Bank       |
+| 12 chars starting with `FT` + 8-digit suffix | CBE               |
 | 12 chars starting with `FT` + 5-digit suffix | Bank of Abyssinia |
-| 10 chars + `phone_number` | CBE Birr |
-| 10 chars (no phone) | Telebirr |
+| 10 chars + `phone_number`                    | CBE Birr          |
+| 10 chars (no phone)                          | Telebirr          |
 
 ```python
 from tx_verify import verify_universal
@@ -224,11 +224,11 @@ print(result.success, result.data, result.error)
 ## Error Handling
 
 All verifiers return **result objects** rather than raising for expected
-failures (network errors, missing receipts, parsing failures).  Inspect
+failures (network errors, missing receipts, parsing failures). Inspect
 `result.success` and `result.error`.
 
 Telebirr may raise `TelebirrVerificationError` when a proxy returns an explicit
-error message.  Catch it if you want to show the user a friendly message:
+error message. Catch it if you want to show the user a friendly message:
 
 ```python
 from tx_verify import TelebirrVerificationError, verify_telebirr
@@ -252,14 +252,14 @@ from tx_verify.utils.error_handler import AppError, ErrorType
 
 ## Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `FALLBACK_PROXIES` | Comma-separated proxy URLs for Telebirr |
-| `TELEBIRR_PROXY_KEY` | API key for Telebirr proxy endpoints |
+| Variable                    | Purpose                                                  |
+| --------------------------- | -------------------------------------------------------- |
+| `FALLBACK_PROXIES`          | Comma-separated proxy URLs for Telebirr                  |
+| `TELEBIRR_PROXY_KEY`        | API key for Telebirr proxy endpoints                     |
 | `SKIP_PRIMARY_VERIFICATION` | Set to `true` to skip primary source (Telebirr / M-Pesa) |
-| `MPESA_PROXY_KEY` | API key for M-Pesa fallback proxy |
-| `MISTRAL_API_KEY` | Required for `verify_image()` |
-| `LOG_LEVEL` | `DEBUG` or `INFO` (default `INFO`) |
+| `MPESA_PROXY_KEY`           | API key for M-Pesa fallback proxy                        |
+| `MISTRAL_API_KEY`           | Required for `verify_image()`                            |
+| `LOG_LEVEL`                 | `DEBUG` or `INFO` (default `INFO`)                       |
 
 ---
 
@@ -283,9 +283,3 @@ mypy tx_verify/
 # Run tests
 pytest
 ```
-
----
-
-## License
-
-ISC © Leul Zenebe

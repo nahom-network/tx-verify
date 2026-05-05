@@ -5,6 +5,7 @@ You need the receipt number AND the phone number linked to the wallet
 (in national format starting with 09, e.g., "0911234567").
 The service fetches a PDF receipt and extracts transaction details.
 """
+
 import asyncio
 
 from tx_verify import verify_cbe_birr
@@ -12,8 +13,8 @@ from tx_verify import verify_cbe_birr
 
 async def main() -> None:
     # Replace with real values
-    receipt_number = "AB1234CD56"
-    phone_number = "0911234567"
+    receipt_number = "DE321C747J2"
+    phone_number = "0910544594"
 
     result = await verify_cbe_birr(receipt_number, phone_number)
 
