@@ -2,7 +2,7 @@
 name = "tx-verify"
 version = "3.0.1"
 description = "Transaction Verification API — Python library for verifying Ethiopian payment transactions (CBE, Telebirr, Dashen, Abyssinia, CBE Birr, M-Pesa)."
-authors = [{name = "Leul Zenebe"}]
+authors = [{name = "Nahom d"}]
 license = {text = "ISC"}
 readme = "README.md"
 requires-python = ">=3.10"
