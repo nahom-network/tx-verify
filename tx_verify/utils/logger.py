@@ -38,7 +38,7 @@ class FileFormatter(logging.Formatter):
 
 def _setup_logger() -> logging.Logger:
     """Create and configure the application logger."""
-    log = logging.getLogger("verifier-api")
+    log = logging.getLogger("tx-verify")
 
     env = os.getenv("NODE_ENV", os.getenv("ENV", "development"))
     level_name = os.getenv("LOG_LEVEL", "INFO" if env == "production" else "DEBUG")

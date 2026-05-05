@@ -8,15 +8,15 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from verifier_api.services.verify_abyssinia import verify_abyssinia
-from verifier_api.services.verify_cbe import verify_cbe
-from verifier_api.services.verify_cbe_birr import CBEBirrError, verify_cbe_birr
-from verifier_api.services.verify_dashen import verify_dashen
-from verifier_api.services.verify_telebirr import (
+from tx_verify.services.verify_abyssinia import verify_abyssinia
+from tx_verify.services.verify_cbe import verify_cbe
+from tx_verify.services.verify_cbe_birr import CBEBirrError, verify_cbe_birr
+from tx_verify.services.verify_dashen import verify_dashen
+from tx_verify.services.verify_telebirr import (
     TelebirrVerificationError,
     verify_telebirr,
 )
-from verifier_api.utils.logger import logger
+from tx_verify.utils.logger import logger
 
 
 @dataclass
@@ -108,12 +108,7 @@ async def verify_universal(
                         success=False,
                         error="Invalid phone number format. Must start with 251 and be 12 digits long.",
                     )
-                if not api_key:
-                    return UniversalResult(
-                        success=False,
-                        error="API key is required in Authorization header or x-api-key header for CBE Birr",
-                    )
-                cbe_result = await verify_cbe_birr(trimmed, trimmed_phone, api_key)
+                cbe_result = await verify_cbe_birr(trimmed, trimmed_phone)
                 if isinstance(cbe_result, CBEBirrError):
                     return UniversalResult(success=False, error=cbe_result.error)
                 return UniversalResult(success=True, data=cbe_result)

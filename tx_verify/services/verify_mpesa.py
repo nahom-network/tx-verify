@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 from pypdf import PdfReader
 
-from verifier_api.utils.logger import logger
+from tx_verify.utils.logger import logger
 
 
 @dataclass

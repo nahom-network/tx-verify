@@ -9,9 +9,9 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from verifier_api.services.verify_cbe import verify_cbe
-from verifier_api.services.verify_telebirr import verify_telebirr
-from verifier_api.utils.logger import logger
+from tx_verify.services.verify_cbe import verify_cbe
+from tx_verify.services.verify_telebirr import verify_telebirr
+from tx_verify.utils.logger import logger
 
 
 @dataclass

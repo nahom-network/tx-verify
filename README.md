@@ -1,78 +1,276 @@
-# Verifier API
+# tx-verify
 
-[![PyPI version](https://img.shields.io/pypi/v/verifier-api.svg)](https://pypi.org/project/verifier-api/)
-[![Python](https://img.shields.io/pypi/pyversions/verifier-api.svg)](https://pypi.org/project/verifier-api/)
-[![License](https://img.shields.io/pypi/l/verifier-api.svg)](https://github.com/YOUR_USERNAME/verifier-api/blob/main/LICENSE)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
+[![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
 
-Payment Verification API — a Python library for verifying Ethiopian payment
-transactions. It supports parsing receipts, extracting reference numbers, and
-validating payments across multiple Ethiopian payment providers.
+> Python library for verifying Ethiopian payment transactions across multiple
+> providers: **CBE**, **Telebirr**, **Dashen Bank**, **Bank of Abyssinia**,
+> **CBE Birr**, and **M-Pesa**.
+
+Each verifier fetches the official receipt from the provider (PDF or HTML),
+parses it, and returns typed result objects.  No headless browser is bundled —
+PDFs are parsed with `pypdf` and HTML with `BeautifulSoup` — so it runs
+anywhere Python does.
+
+---
 
 ## Supported Providers
 
-| Provider       | Function            | Input                |
-|----------------|---------------------|----------------------|
-| CBE            | `verify_cbe()`      | PDF receipt / URL    |
-| Telebirr       | `verify_telebirr()` | Payment reference    |
-| Dashen Bank    | `verify_dashen()`   | PDF receipt / URL    |
-| Bank of Abyssinia | `verify_abyssinia()` | PDF receipt / URL |
-| CBE Birr       | `verify_cbe_birr()` | PDF receipt / URL    |
-| M-Pesa         | `verify_mpesa()`    | PDF receipt / URL    |
-| Image (Mistral AI) | `verify_image()` | Screenshot / image  |
-| Universal      | `verify_universal()`| Auto-detects provider|
+| Provider            | Function                | Input (example)                          |
+|---------------------|-------------------------|------------------------------------------|
+| CBE                 | `verify_cbe()`          | `reference="FT…"`, `account_suffix="…"`  |
+| Telebirr            | `verify_telebirr()`     | `reference="CE12345678"`                 |
+| Dashen Bank         | `verify_dashen()`       | `transaction_reference="123…"` (16 dig)  |
+| Bank of Abyssinia   | `verify_abyssinia()`    | `reference="FT…"`, `suffix="…"` (5 dig)  |
+| CBE Birr            | `verify_cbe_birr()`     | `receipt="…"`, `phone="251…"`            |
+| M-Pesa              | `verify_mpesa()`        | `transaction_id="UE20VG1GS8"`            |
+| Image (Mistral AI)  | `verify_image()`        | `image_bytes`, auto-detects provider     |
+| Universal           | `verify_universal()`    | `reference` — auto-routes by format      |
+
+---
 
 ## Installation
 
 ```bash
-pip install verifier-api
+pip install tx-verify
 ```
+
+Or with `uv`:
+
+```bash
+uv pip install tx-verify
+```
+
+---
 
 ## Quick Start
 
 ```python
-from verifier_api import verify_telebirr, verify_cbe
+import asyncio
+from tx_verify import verify_telebirr, verify_cbe
 
-# Verify a Telebirr transaction
-result = await verify_telebirr(reference="YOUR_REFERENCE_NUMBER")
-print(result.payer_name, result.settled_amount)
+async def main():
+    # --- Telebirr ---
+    receipt = await verify_telebirr("CE12345678")
+    if receipt:
+        print(receipt.payer_name, receipt.settled_amount)
 
-# Verify a CBE receipt from a PDF URL
-result = await verify_cbe("https://example.com/receipt.pdf")
-if result.success:
-    print(f"Amount: {result.amount} ETB")
-    print(f"Paid to: {result.receiver}")
+    # --- CBE ---
+    result = await verify_cbe("FT23062669JJ", account_suffix="12345678")
+    if result.success:
+        print(f"Paid {result.amount} ETB to {result.receiver}")
+
+asyncio.run(main())
 ```
 
-### Image-based verification
+---
+
+## Examples
+
+See the [`examples/`](examples/) directory for a runnable example per
+provider:
+
+| File | What it shows |
+|------|---------------|
+| [`telebirr.py`](examples/telebirr.py) | Verify a Telebirr receipt by reference number |
+| [`cbe.py`](examples/cbe.py) | Fetch and parse a CBE PDF receipt |
+| [`cbe_birr.py`](examples/cbe_birr.py) | Verify a CBE Birr wallet transaction |
+| [`dashen.py`](examples/dashen.py) | Verify a Dashen Bank receipt with retry logic |
+| [`abyssinia.py`](examples/abyssinia.py) | Verify a Bank of Abyssinia transaction |
+| [`mpesa.py`](examples/mpesa.py) | Verify an Ethiopian M-Pesa transaction |
+| [`image.py`](examples/image.py) | Analyse a receipt image with Mistral Vision AI |
+| [`universal.py`](examples/universal.py) | Let the library auto-route to the right provider |
+| [`error_handling.py`](examples/error_handling.py) | Catch provider-specific errors gracefully |
+
+---
+
+## Provider Reference
+
+### CBE — Commercial Bank of Ethiopia
+
+CBE references are **12 characters** starting with `FT`.  You must supply the
+last **8 digits** of the account number as a suffix.  The bank returns a PDF
+that is fetched and parsed automatically.
 
 ```python
-from verifier_api import verify_image
+from tx_verify import verify_cbe
 
-result = await verify_image(
-    image_path="/path/to/screenshot.jpg",
-    auto_verify=True,
-)
-print(result.type, result.reference)
+result = await verify_cbe("FT23062669JJ", "12345678")
+# result.success      → bool
+# result.payer        → str | None
+# result.receiver     → str | None
+# result.amount       → float | None
+# result.date         → datetime | None
+# result.reference    → str | None
+# result.reason       → str | None
+# result.error        → str | None
 ```
+
+### Telebirr
+
+Telebirr references are **10-character alphanumeric** codes.  The library scrapes
+the public Ethio Telecom receipt page.  It tries the primary source first,
+then any fallback proxies configured via the `FALLBACK_PROXIES` environment
+variable.
+
+```python
+from tx_verify import verify_telebirr
+
+receipt = await verify_telebirr("CE12345678")
+# receipt.payer_name, receipt.settled_amount, receipt.total_paid_amount, …
+```
+
+### Dashen Bank
+
+Dashen references are **16-digit numbers** starting with 3 digits (e.g.
+`1234567890123456`).  The verifier fetches a PDF with built-in retry logic
+(up to 5 attempts).
+
+```python
+from tx_verify import verify_dashen
+
+result = await verify_dashen("1234567890123456")
+# result.sender_name, result.transaction_amount, result.total, …
+```
+
+### Bank of Abyssinia
+
+Abyssinia references are also **12 characters** starting with `FT`, but the
+suffix is the last **5 digits** of the account number.  The bank returns JSON
+rather than a PDF.
+
+```python
+from tx_verify import verify_abyssinia
+
+result = await verify_abyssinia("FT23062669JJ", "90172")
+# result.payer, result.amount, result.date, …
+```
+
+### CBE Birr
+
+CBE Birr receipts are **10-character alphanumeric** codes.  You also need the
+wallet phone number in international format (`251…`).
+
+```python
+from tx_verify import verify_cbe_birr
+
+result = await verify_cbe_birr("AB1234CD56", "251911234567")
+# result.customer_name, result.amount, result.paid_amount, …
+```
+
+### M-Pesa
+
+M-Pesa references are **10-character alphanumeric** codes.  The verifier hits
+the Safaricom primary API first, then falls back to a proxy if configured via
+`MPESA_PROXY_KEY`.
+
+```python
+from tx_verify import verify_mpesa
+
+result = await verify_mpesa("UE20VG1GS8")
+# result.payer_name, result.amount, result.service_fee, result.vat, …
+```
+
+### Image verification (Mistral Vision)
+
+Upload a receipt image (JPEG/PNG) and Mistral Vision AI will detect whether it
+is a CBE or Telebirr receipt, extract the reference, and optionally verify it
+automatically.
+
+```python
+from tx_verify import verify_image
+
+with open("receipt.jpg", "rb") as f:
+    image_bytes = f.read()
+
+# Detect only
+info = await verify_image(image_bytes, auto_verify=False)
+print(info.type, info.reference, info.forward_to)
+
+# Auto-verify (account_suffix required for CBE)
+info = await verify_image(
+    image_bytes,
+    auto_verify=True,
+    account_suffix="12345678",
+)
+print(info.verified, info.details)
+```
+
+> Requires `MISTRAL_API_KEY` environment variable and the `mistralai` package
+> (installed automatically).
+
+### Universal — auto-route by reference format
+
+Hand any reference to `verify_universal()` and it routes to the correct provider
+based on length and prefix:
+
+| Reference format | Routed to |
+|------------------|-----------|
+| 16 digits starting with `3` | Dashen Bank |
+| 12 chars starting with `FT` + 8-digit suffix | CBE |
+| 12 chars starting with `FT` + 5-digit suffix | Bank of Abyssinia |
+| 10 chars + `phone_number` | CBE Birr |
+| 10 chars (no phone) | Telebirr |
+
+```python
+from tx_verify import verify_universal
+
+result = await verify_universal("CE12345678")
+print(result.success, result.data, result.error)
+```
+
+---
 
 ## Error Handling
 
+All verifiers return **result objects** rather than raising for expected
+failures (network errors, missing receipts, parsing failures).  Inspect
+`result.success` and `result.error`.
+
+Telebirr may raise `TelebirrVerificationError` when a proxy returns an explicit
+error message.  Catch it if you want to show the user a friendly message:
+
 ```python
-from verifier_api import AppError, ErrorType, verify_telebirr
+from tx_verify import TelebirrVerificationError, verify_telebirr
 
 try:
-    result = await verify_telebirr(reference="INVALID_REF")
-except AppError as e:
-    print(f"Error: {e.type.value} — {e}")
+    receipt = await verify_telebirr("INVALID_REF")
+except TelebirrVerificationError as exc:
+    print(f"Telebirr error: {exc}")
+    if exc.details:
+        print(f"Details: {exc.details}")
 ```
+
+The library also provides a generic error handler for wrapping database or
+internal errors:
+
+```python
+from tx_verify.utils.error_handler import AppError, ErrorType
+```
+
+---
+
+## Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `FALLBACK_PROXIES` | Comma-separated proxy URLs for Telebirr |
+| `TELEBIRR_PROXY_KEY` | API key for Telebirr proxy endpoints |
+| `SKIP_PRIMARY_VERIFICATION` | Set to `true` to skip primary source (Telebirr / M-Pesa) |
+| `MPESA_PROXY_KEY` | API key for M-Pesa fallback proxy |
+| `MISTRAL_API_KEY` | Required for `verify_image()` |
+| `LOG_LEVEL` | `DEBUG` or `INFO` (default `INFO`) |
+
+---
 
 ## Development
 
 ```bash
-# Clone and set up
-git clone https://github.com/YOUR_USERNAME/verifier-api.git
-cd verifier-api
+# Clone
+git clone https://github.com/YOUR_USERNAME/tx-verify.git
+cd tx-verify
+
+# Install with dev dependencies
 pip install -e ".[dev]"
 
 # Lint & format
@@ -80,25 +278,14 @@ ruff check .
 ruff format .
 
 # Type-check
-mypy .
+mypy tx_verify/
 
 # Run tests
 pytest
 ```
 
-## API Key Authentication (Middleware)
+---
 
-The library includes optional API key middleware for protecting API endpoints:
+## License
 
-```python
-from verifier_api.middleware.api_key_auth import (
-    ApiKeyAuth,
-    ApiKeyStore,
-    ApiKeyRecord,
-    generate_api_key,
-    hash_api_key,
-)
-```
-
-Implement `ApiKeyStore` to plug in your database of choice.
-
+ISC © Leul Zenebe

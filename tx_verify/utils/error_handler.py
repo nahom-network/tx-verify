@@ -36,7 +36,7 @@ def handle_database_error(error: Exception) -> AppError:
     In the TS version this handled Prisma-specific error codes.
     Here we map common SQLAlchemy / generic DB exceptions.
     """
-    from verifier_api.utils.logger import logger
+    from tx_verify.utils.logger import logger
 
     if isinstance(error, AppError):
         return error

@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 from bs4 import BeautifulSoup
 
-from verifier_api.utils.logger import logger
+from tx_verify.utils.logger import logger
 
 
 @dataclass

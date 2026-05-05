@@ -8,8 +8,8 @@ from datetime import datetime
 
 import httpx
 
-from verifier_api.services.verify_cbe import VerifyResult
-from verifier_api.utils.logger import logger
+from tx_verify.services.verify_cbe import VerifyResult
+from tx_verify.utils.logger import logger
 
 
 @dataclass
