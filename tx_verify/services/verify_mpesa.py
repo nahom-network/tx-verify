@@ -1,14 +1,11 @@
-"""M-Pesa payment verification service.
-
-Translated from src/services/verifyMpesa.ts
-"""
+"""M-Pesa payment verification service."""
 
 import base64
 import io
 import os
 import re
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -20,19 +17,26 @@ from tx_verify.utils.logger import logger
 
 @dataclass
 class MpesaVerifyResult:
-    """M-Pesa verification result."""
+    """M-Pesa verification result.
+
+    Fields present on every receipt are typed attributes.
+    Fields that vary by receipt type go into ``meta``.
+    """
 
     success: bool
-    payer_name: str | None = None
-    payer_account: str | None = None
-    receiver_name: str | None = None
-    receiver_account: str | None = None
     transaction_id: str | None = None
     receipt_no: str | None = None
     payment_date: datetime | None = None
     amount: float | None = None
     service_fee: float | None = None
     vat: float | None = None
+    payer_name: str | None = None
+    payer_account: str | None = None
+    payment_method: str | None = None
+    transaction_type: str | None = None
+    payment_channel: str | None = None
+    amount_in_words: str | None = None
+    meta: dict = field(default_factory=dict)
     error: str | None = None
 
 
@@ -40,8 +44,152 @@ def _title_case(s: str) -> str:
     return s.title()
 
 
+def _clean_amharic(text: str) -> str:
+    """Strip Ethiopic/Amharic characters from extracted text."""
+    return re.sub(
+        r"[\u1200-\u137F\u1380-\u139F\u2D80-\u2DDF\uAB00-\uAB2F]+", " ", text
+    ).strip()
+
+
+def _extract_layout_lines(pdf_bytes: bytes) -> list[str]:
+    """Extract raw text lines from a PDF using layout-aware extraction."""
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    lines: list[str] = []
+    for page in reader.pages:
+        text = page.extract_text(extraction_mode="layout") or ""
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if stripped:
+                lines.append(stripped)
+    return lines
+
+
+def _split_label_value(line: str) -> tuple[str | None, str | None]:
+    """Split a layout-extracted line into (label, value).
+
+    M-Pesa PDFs render labels on the left and values on the right,
+    separated by two or more spaces.  We strip leading ``/`` and Amharic
+    text before splitting.
+    """
+    line = _clean_amharic(line)
+    line = line.lstrip("/").strip()
+
+    # Multi-column detail rows (RECEIPT NO / PAYMENT DATE / SETTLED AMOUNT)
+    # are handled separately, so we only care about normal label-value lines.
+    parts = re.split(r"\s{2,}", line)
+    if len(parts) >= 2:
+        label = parts[0].strip().rstrip(":").strip()
+        value = parts[-1].strip()
+        return label, value
+    return None, None
+
+
+def _is_null_value(value: str) -> bool:
+    return value in ("- - -", "null", "---", "")
+
+
+_LABEL_MAP: dict[str, tuple[str, str]] = {
+    "SENDER NAME": ("payer_name", "data"),
+    "BUYER NAME": ("payer_name", "data"),
+    "SENDER NUMBER": ("payer_account", "data"),
+    "BUYER PHONE NUMBER": ("payer_account", "data"),
+    "SENDER TIN NO": ("payer_tin", "meta"),
+    "BUYER TIN NO": ("payer_tin", "meta"),
+    "RECEIVER NAME": ("receiver_name", "meta"),
+    "RECEIVER ACCOUNT NUMBER": ("receiver_account", "meta"),
+    "RECEIVER BUSINESS NAME": ("receiver_business_name", "meta"),
+    "RECEIVER BUSINESS NUMBER": ("receiver_business_number", "meta"),
+    "BANK NAME": ("bank_name", "meta"),
+    "TRANSACTION ID": ("transaction_id", "data"),
+    "SERVICE FEE": ("service_fee", "data"),
+    "DISCOUNT": ("discount", "meta"),
+    "+ 15% VAT": ("vat", "data"),
+    "TOTAL": ("amount", "data"),
+    "TOTAL AMOUNT IN WORDS": ("amount_in_words", "data"),
+    "PAYMENT METHOD": ("payment_method", "data"),
+    "TRANSACTION TYPE": ("transaction_type", "data"),
+    "PAYMENT CHANNEL": ("payment_channel", "data"),
+    "PAYMENT REASON": ("payment_reason", "meta"),
+    "PACKAGE DETAILS": ("package_details", "meta"),
+    "VALIDITY PERIOD": ("validity_period", "meta"),
+}
+
+
+def _parse_receipt_lines(lines: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Parse layout-extracted lines into structured data + meta dict."""
+    data: dict[str, Any] = {}
+    meta: dict[str, Any] = {}
+
+    # --- Multi-column detail header ---
+    receipt_header_idx: int | None = None
+    for i, line in enumerate(lines):
+        if "RECEIPT NO" in line and "PAYMENT DATE" in line and "SETTLED AMOUNT" in line:
+            receipt_header_idx = i
+            break
+
+    if receipt_header_idx is not None and receipt_header_idx + 1 < len(lines):
+        val_line = _clean_amharic(lines[receipt_header_idx + 1]).strip()
+        parts = re.split(r"\s{2,}", val_line)
+        if len(parts) >= 3:
+            data["receipt_no"] = parts[0].strip()
+            date_time_str = " ".join(parts[1:-1]).strip()
+            amount_str = parts[-1].strip()
+            data["amount"] = float(amount_str)
+            m = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", date_time_str)
+            if m:
+                with suppress(ValueError):
+                    data["payment_date"] = datetime.strptime(
+                        m.group(1), "%Y-%m-%d %H:%M:%S"
+                    )
+
+    # --- Regular label-value pairs ---
+    for i, line in enumerate(lines):
+        if receipt_header_idx is not None and i in (
+            receipt_header_idx,
+            receipt_header_idx + 1,
+        ):
+            continue
+
+        label, value = _split_label_value(line)
+        if not label or not value or _is_null_value(value):
+            continue
+
+        # Skip section headers and unrelated text
+        if label in ("TRANSACTION INFORMATION", "TRANSACTION DETAIL", "SCAN TO VERIFY"):
+            continue
+        if label.startswith("Safaricom") or label.startswith("THANK YOU"):
+            continue
+
+        mapping = _LABEL_MAP.get(label)
+        if mapping:
+            key, dest = mapping
+            container = data if dest == "data" else meta
+            container[key] = value
+
+    # --- Clean up payer name ---
+    if "payer_name" in data:
+        data["payer_name"] = _title_case(data["payer_name"])
+
+    # --- Convert numeric string fields to float ---
+    for key in ("amount", "service_fee", "vat"):
+        if key in data:
+            with suppress(ValueError):
+                data[key] = float(str(data[key]).replace(",", ""))
+
+    # Discount only goes to meta, but may still be a string
+    if "discount" in meta:
+        with suppress(ValueError):
+            meta["discount"] = float(str(meta["discount"]).replace(",", ""))
+
+    return data, meta
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 async def _fetch_from_url(url: str, source: str) -> Any:
-    logger.info("\U0001f50e Fetching receipt data from %s: %s", source, url)
+    logger.info("🔎 Fetching receipt data from %s: %s", source, url)
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.get(
             url,
@@ -71,18 +219,18 @@ async def verify_mpesa(transaction_id: str) -> MpesaVerifyResult:
                 data = await _fetch_from_url(primary_url, "primary API")
             except Exception as e:
                 logger.warning(
-                    "\u26a0\ufe0f Primary M-Pesa fetch failed: %s. Trying fallback proxy...", e
+                    "⚠️ Primary M-Pesa fetch failed: %s. Trying fallback proxy...", e
                 )
         else:
             logger.info(
-                "\u23ed\ufe0f Skipping primary verifier due to SKIP_PRIMARY_VERIFICATION=true"
+                "⏭️ Skipping primary verifier due to SKIP_PRIMARY_VERIFICATION=true"
             )
 
         if not data or data.get("responseCode") != "0" or not data.get("base64Data"):
             try:
                 data = await _fetch_from_url(fallback_url, "fallback proxy")
             except Exception as e:
-                logger.error("\u274c M-Pesa fallback proxy request failed: %s", e)
+                logger.error("❌ M-Pesa fallback proxy request failed: %s", e)
 
         if not data:
             return MpesaVerifyResult(
@@ -91,114 +239,54 @@ async def verify_mpesa(transaction_id: str) -> MpesaVerifyResult:
             )
 
         logger.info(
-            "\U0001f4e1 API Response Code: %s, Description: %s",
+            "📡 API Response Code: %s, Description: %s",
             data.get("responseCode"),
             data.get("responseDescription"),
         )
 
         if data.get("responseCode") == "0" and data.get("base64Data"):
-            logger.info("\u2705 API returned success and base64 data. Converting to buffer...")
+            logger.info(
+                "✅ API returned success and base64 data. Converting to buffer..."
+            )
             try:
                 pdf_bytes = base64.b64decode(data["base64Data"])
                 logger.info(
-                    "\U0001f4e6 PDF Buffer created (%d bytes). Parsing PDF...", len(pdf_bytes)
+                    "📦 PDF Buffer created (%d bytes). Parsing PDF...", len(pdf_bytes)
                 )
                 return _parse_mpesa_receipt(pdf_bytes)
             except Exception as e:
-                logger.error("\u274c Failed to convert/parse base64 PDF: %s", e)
-                return MpesaVerifyResult(success=False, error=f"Failed to process PDF data: {e}")
+                logger.error("❌ Failed to convert/parse base64 PDF: %s", e)
+                return MpesaVerifyResult(
+                    success=False, error=f"Failed to process PDF data: {e}"
+                )
         else:
-            logger.warning("\u26a0\ufe0f M-Pesa returned unsuccessful code or missing data")
+            logger.warning("⚠️ M-Pesa returned unsuccessful code or missing data")
             return MpesaVerifyResult(
                 success=False,
                 error=f"API Error: {data.get('responseDescription', 'Unknown error')}",
             )
 
     except Exception as e:
-        logger.error("\u274c M-Pesa verification failed: %s", e)
+        logger.error("❌ M-Pesa verification failed: %s", e)
         return MpesaVerifyResult(success=False, error=f"Request failed: {e}")
 
 
 def _parse_mpesa_receipt(pdf_bytes: bytes) -> MpesaVerifyResult:
     """Extract fields from an M-Pesa PDF receipt."""
     try:
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        raw_text = ""
-        for page in reader.pages:
-            raw_text += page.extract_text() or ""
-        raw_text = re.sub(r"\s+", " ", raw_text).strip()
+        logger.info("📄 Parsing M-Pesa receipt text")
+        lines = _extract_layout_lines(pdf_bytes)
+        data, meta = _parse_receipt_lines(lines)
 
-        logger.info("\U0001f4c4 Parsing M-Pesa receipt text")
-        logger.debug("\U0001f4dd Raw PDF text length: %d characters", len(raw_text))
+        if not data.get("transaction_id"):
+            logger.error("❌ Could not extract transaction_id from PDF")
+            return MpesaVerifyResult(
+                success=False, error="Could not parse required fields from PDF receipt."
+            )
 
-        payer_name_m = re.search(
-            r"PAYER NAME\s+(.*?)\s+(?:PAYER PHONE|00\d+|Addis Ababa|\+251|\u12e8\u12a8\u134b\u12ed \u1235\u121d)",
-            raw_text,
-            re.I,
-        )
-        payer_name = payer_name_m.group(1).strip() if payer_name_m else None
-
-        payer_phone_m = re.search(r"PAYER PHONE NUMBER\s+(\d+)", raw_text, re.I)
-        payer_phone = payer_phone_m.group(1).strip() if payer_phone_m else None
-
-        tx_id_m = re.search(r"TRANSACTION ID\s+([A-Z0-9]+)", raw_text, re.I)
-        tx_id = tx_id_m.group(1).strip() if tx_id_m else None
-
-        receipt_m = re.search(r"RECEIPT NO.*?([A-Z0-9]{10,})(?:202\d)", raw_text, re.I)
-        receipt_no = receipt_m.group(1).strip() if receipt_m else None
-
-        amount_m = re.search(r"TOTAL\s+([\d,]+\.\d{2})", raw_text, re.I)
-        amount = float(amount_m.group(1).replace(",", "")) if amount_m else None
-
-        svc_fee_m = re.search(r"([\d,]+\.\d{2})\s*Birr\s*/\s*SERVICE FEE", raw_text, re.I)
-        service_fee = float(svc_fee_m.group(1).replace(",", "")) if svc_fee_m else None
-
-        vat_m = re.search(r"SERVICE FEE\s*/\s*([\d,]+\.\d{2})\s*.*?\+ 15% VAT", raw_text, re.I)
-        vat: float | None = float(vat_m.group(1).replace(",", "")) if vat_m else None
-
-        if vat is None and service_fee is not None and re.search(r"/ \+ 15% VAT", raw_text):
-            vat = 0.0
-
-        date_m = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", raw_text)
-        payment_date: datetime | None = None
-        if date_m:
-            with suppress(ValueError):
-                payment_date = datetime.strptime(date_m.group(1), "%Y-%m-%d %H:%M:%S")
-
-        receiver_name_m = re.search(
-            r"RECEIVER NAME.*?(?:\u12e8\u1270\u1240\u1263\u12e9 \u1262\u12dd\u1290\u1235 \u1235\u121d)?\s+([A-Za-z\s]+?)\s+/",
-            raw_text,
-            re.I,
-        )
-        receiver_name = receiver_name_m.group(1).strip() if receiver_name_m else None
-
-        receiver_num_m = re.search(r"RECEIVER NUMBER\s+(\d+)", raw_text, re.I)
-        receiver_phone = receiver_num_m.group(1).strip() if receiver_num_m else None
-
-        if not receiver_phone:
-            fallback_m = re.search(r"TOTAL\s+[\d,]+\.\d{2}\s+(\d{9,12})", raw_text, re.I)
-            if fallback_m:
-                receiver_phone = fallback_m.group(1)
-
-        # Clean up payer name
-        if payer_name:
-            payer_name = re.sub(r"\d+.*", "", payer_name).strip()
-            payer_name = _title_case(payer_name)
-
-        return MpesaVerifyResult(
-            success=True,
-            payer_name=payer_name,
-            payer_account=payer_phone,
-            receiver_name=_title_case(receiver_name) if receiver_name else None,
-            receiver_account=receiver_phone,
-            transaction_id=tx_id,
-            receipt_no=receipt_no,
-            payment_date=payment_date,
-            amount=amount,
-            service_fee=service_fee,
-            vat=vat,
-        )
+        logger.info("✅ Parsed M-Pesa receipt for transaction %s", data.get("transaction_id"))
+        return MpesaVerifyResult(success=True, meta=meta, **data)
 
     except Exception as e:
-        logger.error("\u274c Error parsing PDF buffer: %s", e)
+        logger.error("❌ Error parsing PDF buffer: %s", e)
         return MpesaVerifyResult(success=False, error=f"Failed to parse PDF content: {e}")
