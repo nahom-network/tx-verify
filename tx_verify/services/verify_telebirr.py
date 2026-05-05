@@ -5,7 +5,7 @@ Translated from src/services/verifyTelebirr.ts
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -18,6 +18,7 @@ from tx_verify.utils.logger import logger
 class TelebirrReceipt:
     """Telebirr receipt data."""
 
+    # Core fields — present on every receipt and needed for verification
     payer_name: str = ""
     payer_telebirr_no: str = ""
     credited_party_name: str = ""
@@ -31,6 +32,9 @@ class TelebirrReceipt:
     total_paid_amount: str = ""
     bank_name: str = ""
 
+    # Variable / receipt-type-specific fields that don't appear on every receipt
+    meta: dict = field(default_factory=dict)
+
 
 class TelebirrVerificationError(Exception):
     """Raised when Telebirr verification encounters a known error."""
@@ -42,171 +46,163 @@ class TelebirrVerificationError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Regex extractors (mirrors the TS regex helpers)
+# Label map — internal field name → possible label text(s) seen in real HTML
 # ---------------------------------------------------------------------------
 
+_LABELS: dict[str, list[str]] = {
+    "payer_name": ["የከፋይ ስም/Payer Name"],
+    "payer_telebirr_no": ["የከፋይ ቴሌብር ቁ./Payer telebirr no."],
+    "payer_account_type": ["የከፋይ አካውንት አይነት/Payer account type"],
+    "payer_tin_no": ["የከፋይ ቲን ቁ./ Payer TIN No"],
+    "payer_vat_reg_no": ["የከፋይ ተ.እ.ታ.ቁ./VAT Reg. No"],
+    "payer_vat_reg_date": ["የከፋይ ተ.እ.ታ.ቁ. ምዝገባ ቀን/VAT Reg. Date"],
+    "credited_party_name": ["የገንዘብ ተቀባይ ስም/Credited Party name"],
+    "credited_party_account_no": ["የገንዘብ ተቀባይ ቴሌብር ቁ./Credited party account no"],
+    "credited_party_tin_no": ["የገንዘብ ተቀባይ ቲን ቁ./Credited party TIN No"],
+    "transaction_status": ["የክፍያው ሁኔታ/transaction status"],
+    "address": ["አድራሻ/Address"],
+    "vehicle_plate_number": ["የመኪናው ሰሌዳ ቁ./Vehicle plate number"],
+    "account_service_number": ["የቢል ስልክ ቁ/አካውንት/Account/Service number"],
+    "airtime_purchased_for": ["የአየር ሰአት የተገዛለት/Airtime purchased for"],
+    "bank_account_number": ["የባንክ አካውንት ቁጥር/Bank account number"],
+    # Invoice detail section
+    "receipt_no": ["የክፍያ ቁጥር/Invoice No."],
+    "payment_date": ["የክፍያ ቀን/Payment date"],
+    "settled_amount": ["የተከፈለው መጠን/Settled Amount"],
+    "vat_15_percent": ["15% ተ.እ.ታ/VAT"],
+    "stamp_duty": ["የማህተም ክፍያ/Stamp Duty"],
+    "discount_amount": ["ቅናሽ/Discount Amount"],
+    "service_fee": ["የአገልግሎት ክፍያ/Service fee", "የአገልግሎት ክፍያ/service fee"],
+    "service_fee_vat": ["የአገልግሎት ክፍያ ተ.እ.ታ/Service fee VAT"],
+    "total_paid_amount": ["ጠቅላላ የተከፈለ/Total Paid Amount"],
+    # Bottom section
+    "total_amount_in_word": ["የገንዘቡ ልክ በፊደል/Total Amount in word"],
+    "payment_mode": ["የክፍያ ዘዴ/Payment Mode"],
+    "payment_reason": ["የክፍያ ምክንያት/Payment Reason"],
+    "payment_channel": ["የክፍያ መንገድ/Payment channel"],
+    "customer_note": ["የደንበኛ መልዕክት/Customer Note"],
+}
 
-def _extract_settled_amount_regex(html: str) -> str | None:
-    patterns = [
-        r"\u12e8\u1270\u12a8\u1348\u1208\u12cd\s+\u1218\u1320\u1295/Settled\s+Amount.*?</td>\s*<td[^>]*>\s*(\d+(?:\.\d{2})?\s+Birr)",
-        r"<tr[^>]*>.*?\u12e8\u1270\u12a8\u1348\u1208\u12cd\s+\u1218\u1320\u1295/Settled\s+Amount.*?<td[^>]*>\s*(\d+(?:\.\d{2})?\s+Birr)",
-        r"Settled\s+Amount.*?(\d+(?:\.\d{2})?\s+Birr)",
-    ]
-    for p in patterns:
-        m = re.search(p, html, re.I | re.S)
-        if m:
-            return m.group(1).strip()
+# Fields that belong on the TelebirrReceipt dataclass directly (core fields).
+_CORE_FIELDS: set[str] = {
+    "payer_name",
+    "payer_telebirr_no",
+    "credited_party_name",
+    "credited_party_account_no",
+    "transaction_status",
+    "receipt_no",
+    "payment_date",
+    "settled_amount",
+    "service_fee",
+    "service_fee_vat",
+    "total_paid_amount",
+    "bank_name",
+}
+
+# Fields present on *some* receipts but not all — these go into meta.
+_VARIABLE_FIELDS: set[str] = {
+    "credited_party_tin_no",
+    "address",
+    "vehicle_plate_number",
+    "account_service_number",
+    "airtime_purchased_for",
+    "bank_account_number",
+    "vat_15_percent",
+}
+
+
+def _match_label(line: str) -> str | None:
+    """Return the internal field name if `line` matches any known label."""
+    line_lower = line.lower()
+    for field_name, labels in _LABELS.items():
+        for label_text in labels:
+            if label_text.lower() in line_lower:
+                return field_name
     return None
-
-
-def _extract_service_fee_regex(html: str) -> str | None:
-    pattern = r"\u12e8\u12a0\u1308\u120d\u130d\u120e\u1275\s+\u12ad\u134d\u12eb/Service\s+fee(?!\s+\u1270\.\u12a5\.\u1273).*?</td>\s*<td[^>]*>\s*(\d+(?:\.\d{2})?\s+Birr)"
-    m = re.search(pattern, html, re.I)
-    if m:
-        return m.group(1).strip()
-    return None
-
-
-def _extract_receipt_no_regex(html: str) -> str | None:
-    pattern = (
-        r'<td[^>]*class="[^"]*receipttableTd[^"]*receipttableTd2[^"]*"[^>]*>\s*([A-Z0-9]+)\s*</td>'
-    )
-    m = re.search(pattern, html, re.I)
-    if m:
-        return m.group(1).strip()
-    return None
-
-
-def _extract_date_regex(html: str) -> str | None:
-    m = re.search(r"(\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2})", html)
-    if m:
-        return m.group(1).strip()
-    return None
-
-
-def _extract_with_regex(html: str, label_pattern: str) -> str | None:
-    escaped = re.escape(label_pattern)
-    pattern = f"{escaped}.*?</td>\\s*<td[^>]*>\\s*([^<]+)"
-    m = re.search(pattern, html, re.I)
-    if m:
-        val = re.sub(r"<[^>]*>", "", m.group(1)).strip()
-        return val
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Scraper
-# ---------------------------------------------------------------------------
 
 
 def _scrape_telebirr_receipt(html: str) -> TelebirrReceipt:
-    """Scrape Telebirr receipt data from HTML using BeautifulSoup + regex fallbacks."""
+    """Scrape Telebirr receipt data from HTML using a flat line-scanning approach.
+
+    The Ethio Telecom receipt HTML contains nested <table> structures with
+    inconsistent nesting (some rows have their sibling <td> inside the same
+    <tr>, others have broken markup).  Rather than relying on the DOM tree,
+    we flatten the text and scan for label → value pairs in order.
+    """
     soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text(separator="\n")
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
 
-    def get_text(label: str) -> str:
-        td = soup.find("td", string=re.compile(re.escape(label), re.I))
-        if td:
-            nxt = td.find_next_sibling("td")
-            if nxt:
-                return nxt.get_text(strip=True)
-        return ""
+    raw: dict[str, str] = {}
 
-    def get_text_with_fallback(label: str) -> str:
-        regex_result = _extract_with_regex(html, label)
-        if regex_result:
-            return regex_result
-        return get_text(label)
+    # ------------------------------------------------------------------
+    # Pass 1 — extract label → value pairs
+    # ------------------------------------------------------------------
+    i = 0
+    while i < len(lines):
+        field = _match_label(lines[i])
+        if field:
+            # If the next line is also a label, the current label's value is empty.
+            if i + 1 < len(lines) and _match_label(lines[i + 1]):
+                raw[field] = ""
+                i += 1
+                continue
+            # Otherwise the next line is the value.
+            if i + 1 < len(lines):
+                raw[field] = lines[i + 1]
+                i += 2
+                continue
+            raw[field] = ""
+            i += 1
+            continue
+        i += 1
 
-    def get_payment_date() -> str:
-        rd = _extract_date_regex(html)
-        if rd:
-            return rd
-        td = soup.find("td", class_="receipttableTd", string=re.compile(r"-202"))
-        return td.get_text(strip=True) if td else ""
+    # ------------------------------------------------------------------
+    # Pass 2 — fix the invoice-detail section
+    #
+    # The receipt has a 3-column header row:
+    #   Invoice No. | Payment date | Settled Amount
+    # followed immediately by the three values on the next three lines.
+    # ------------------------------------------------------------------
+    for idx, line in enumerate(lines):
+        if "የክፍያ ዝርዝር/ Invoice details" in line or "የክፍያ ዝርዝር/Invoice details" in line:
+            val_start = idx + 4  # skip "Invoice details" + 3 header labels
+            if val_start + 2 < len(lines):
+                raw["receipt_no"] = lines[val_start]
+                raw["payment_date"] = lines[val_start + 1]
+                raw["settled_amount"] = lines[val_start + 2]
+            break
 
-    def get_receipt_no() -> str:
-        rn = _extract_receipt_no_regex(html)
-        if rn:
-            return rn
-        tds = soup.find_all("td", class_=re.compile(r"receipttableTd.*receipttableTd2"))
-        if len(tds) > 1:
-            return tds[1].get_text(strip=True)
-        return ""
-
-    def get_settled_amount() -> str:
-        ra = _extract_settled_amount_regex(html)
-        if ra:
-            return ra
-        # Cheerio-style fallback
-        for tr in soup.find_all("tr"):
-            tds = tr.find_all("td")
-            if tds and tds[0].get_text():
-                text = tds[0].get_text()
-                if (
-                    "\u12e8\u1270\u12a8\u1348\u1208\u12cd \u1218\u1320\u1295" in text
-                    or "Settled Amount" in text
-                ):
-                    return tds[-1].get_text(strip=True)
-        return ""
-
-    def get_service_fee() -> str:
-        rf = _extract_service_fee_regex(html)
-        if rf:
-            return rf
-        for tr in soup.find_all("tr"):
-            text = tr.get_text()
-            if (
-                (
-                    "\u12e8\u12a0\u1308\u120d\u130d\u120e\u1275 \u12ad\u134d\u12eb" in text
-                    or "Service fee" in text
-                )
-                and "\u1270.\u12a5.\u1273" not in text
-                and "VAT" not in text
-            ):
-                tds = tr.find_all("td")
-                if tds:
-                    return tds[-1].get_text(strip=True)
-        return ""
-
-    credited_party_name = get_text_with_fallback(
-        "\u12e8\u1308\u1295\u12d8\u1265 \u1270\u1240\u1263\u12ed \u1235\u121d/Credited Party name"
-    )
-    credited_party_account_no = get_text_with_fallback(
-        "\u12e8\u1308\u1295\u12d8\u1265 \u1270\u1240\u1263\u12ed \u1274\u120c\u1265\u122d \u1241./Credited party account no"
-    )
+    # ------------------------------------------------------------------
+    # Pass 3 — bank-transfer detection
+    # ------------------------------------------------------------------
     bank_name = ""
+    if raw.get("bank_account_number"):
+        # When a bank account number is present the credited party *is* the bank.
+        bank_name = raw.get("credited_party_name", "")
 
-    bank_account_raw = get_text_with_fallback(
-        "\u12e8\u1263\u1295\u12ad \u12a0\u12ab\u12cd\u1295\u1275 \u1241\u1325\u122d/Bank account number"
-    )
-    if bank_account_raw:
-        bank_name = credited_party_name
-        m = re.match(r"(\d+)\s+(.*)", bank_account_raw)
-        if m:
-            credited_party_account_no = m.group(1).strip()
-            credited_party_name = m.group(2).strip()
+    # ------------------------------------------------------------------
+    # Build core attributes and meta dict
+    # ------------------------------------------------------------------
+    meta: dict[str, str] = {}
+    for key, val in raw.items():
+        if key in _VARIABLE_FIELDS and val:
+            meta[key] = val
 
     return TelebirrReceipt(
-        payer_name=get_text_with_fallback("\u12e8\u12a8\u134b\u12ed \u1235\u121d/Payer Name"),
-        payer_telebirr_no=get_text_with_fallback(
-            "\u12e8\u12a8\u134b\u12ed \u1274\u120c\u1265\u122d \u1241./Payer telebirr no."
-        ),
-        credited_party_name=credited_party_name,
-        credited_party_account_no=credited_party_account_no,
-        transaction_status=get_text_with_fallback(
-            "\u12e8\u12ad\u134d\u12eb\u12cd \u1201\u1294\u1273/transaction status"
-        ),
-        receipt_no=get_receipt_no(),
-        payment_date=get_payment_date(),
-        settled_amount=get_settled_amount(),
-        service_fee=get_service_fee(),
-        service_fee_vat=get_text_with_fallback(
-            "\u12e8\u12a0\u1308\u120d\u130d\u120e\u1275 \u12ad\u134d\u12eb \u1270.\u12a5.\u1273/Service fee VAT"
-        ),
-        total_paid_amount=get_text_with_fallback(
-            "\u1320\u1245\u120b\u120b \u12e8\u1270\u12a8\u1348\u1208/Total Paid Amount"
-        ),
+        payer_name=raw.get("payer_name", ""),
+        payer_telebirr_no=raw.get("payer_telebirr_no", ""),
+        credited_party_name=raw.get("credited_party_name", ""),
+        credited_party_account_no=raw.get("credited_party_account_no", ""),
+        transaction_status=raw.get("transaction_status", ""),
+        receipt_no=raw.get("receipt_no", ""),
+        payment_date=raw.get("payment_date", ""),
+        settled_amount=raw.get("settled_amount", ""),
+        service_fee=raw.get("service_fee", ""),
+        service_fee_vat=raw.get("service_fee_vat", ""),
+        total_paid_amount=raw.get("total_paid_amount", ""),
         bank_name=bank_name,
+        meta=meta,
     )
 
 
@@ -218,7 +214,9 @@ def _parse_telebirr_json(json_data: Any) -> TelebirrReceipt | None:
             return None
 
         d = json_data["data"]
-        return TelebirrReceipt(
+
+        # Core fields
+        receipt = TelebirrReceipt(
             payer_name=d.get("payerName", ""),
             payer_telebirr_no=d.get("payerTelebirrNo", ""),
             credited_party_name=d.get("creditedPartyName", ""),
@@ -232,6 +230,19 @@ def _parse_telebirr_json(json_data: Any) -> TelebirrReceipt | None:
             total_paid_amount=d.get("totalPaidAmount", ""),
             bank_name=d.get("bankName", ""),
         )
+
+        # Any leftover keys that aren't core go into meta
+        core_json_keys = {
+            "payerName", "payerTelebirrNo", "creditedPartyName",
+            "creditedPartyAccountNo", "transactionStatus", "receiptNo",
+            "paymentDate", "settledAmount", "serviceFee", "serviceFeeVAT",
+            "totalPaidAmount", "bankName", "success", "error", "details",
+        }
+        for key, val in d.items():
+            if key not in core_json_keys and val:
+                receipt.meta[key] = str(val)
+
+        return receipt
     except Exception as e:
         logger.error("Error parsing JSON from proxy endpoint: %s", e)
         return None
