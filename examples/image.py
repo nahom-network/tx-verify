@@ -3,6 +3,7 @@
 This example shows how to analyse a receipt image and optionally
 auto-verify the detected transaction.  Requires a Mistral API key.
 """
+
 import asyncio
 import os
 

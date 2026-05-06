@@ -47,7 +47,7 @@ from tx_verify.utils.http_client import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 TARGET_PORT = 0  # let OS pick
-PROXY_PORT = 0   # let OS pick
+PROXY_PORT = 0  # let OS pick
 
 
 class _TargetHandler(BaseHTTPRequestHandler):
@@ -98,6 +98,7 @@ def _start_server(handler: type[BaseHTTPRequestHandler], port: int = 0) -> HTTPS
 # ---------------------------------------------------------------------------
 # Test suite
 # ---------------------------------------------------------------------------
+
 
 class TestProxyScenarios(unittest.IsolatedAsyncioTestCase):
     """Run the seven required proxy scenarios."""

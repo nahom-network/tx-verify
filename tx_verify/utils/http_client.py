@@ -130,6 +130,7 @@ def _is_proxy_related_error(exc: Exception) -> bool:
 # Client factory
 # ---------------------------------------------------------------------------
 
+
 def get_async_client(
     *,
     timeout: float = 30.0,
@@ -206,6 +207,7 @@ def get_sync_client(
 # Retry wrapper
 # ---------------------------------------------------------------------------
 
+
 async def fetch_with_retry(
     url: str,
     *,
@@ -252,11 +254,7 @@ async def fetch_with_retry(
             last_exception = exc
             is_proxy_err = _is_proxy_related_error(exc)
             safe_url = _mask_credentials(str(url))
-            safe_proxy = (
-                _mask_credentials(str(resolved_proxies))
-                if resolved_proxies
-                else "none"
-            )
+            safe_proxy = _mask_credentials(str(resolved_proxies)) if resolved_proxies else "none"
 
             if is_proxy_err:
                 logger.warning(
@@ -327,11 +325,7 @@ def fetch_sync_with_retry(
             last_exception = exc
             is_proxy_err = _is_proxy_related_error(exc)
             safe_url = _mask_credentials(str(url))
-            safe_proxy = (
-                _mask_credentials(str(resolved_proxies))
-                if resolved_proxies
-                else "none"
-            )
+            safe_proxy = _mask_credentials(str(resolved_proxies)) if resolved_proxies else "none"
 
             if is_proxy_err:
                 logger.warning(

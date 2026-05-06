@@ -4,6 +4,7 @@ Abyssinia references start with "FT" and are 12 characters long.
 You must provide the last 5 digits of the account number as a suffix.
 The bank exposes a JSON API that returns structured transaction data.
 """
+
 import asyncio
 
 from tx_verify import verify_abyssinia

@@ -3,6 +3,7 @@
 demonstrates catching provider-specific errors and inspecting the
 result object to decide what to show the user.
 """
+
 import asyncio
 
 from tx_verify import (

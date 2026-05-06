@@ -56,7 +56,9 @@ async def verify_cbe(
 
     try:
         logger.info("\U0001f50e Attempting direct fetch: %s", url)
-        async with get_async_client(verify=_make_ssl_context(), timeout=30.0, proxies=proxies) as client:
+        async with get_async_client(
+            verify=_make_ssl_context(), timeout=30.0, proxies=proxies
+        ) as client:
             response = await client.get(
                 url,
                 headers={

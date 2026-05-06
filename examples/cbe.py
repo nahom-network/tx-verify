@@ -4,6 +4,7 @@ CBE references start with "FT" and are 12 characters long (e.g., "FT23062669JJ")
 You must also provide the last 8 digits of the account number as a suffix.
 The bank returns a PDF receipt that is parsed automatically.
 """
+
 import asyncio
 
 from tx_verify import verify_cbe

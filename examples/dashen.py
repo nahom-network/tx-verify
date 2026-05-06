@@ -4,6 +4,7 @@ Dashen Bank references are 16-digit numbers starting with 3 digits
 (e.g., "1234567890123456").  The verifier fetches a PDF receipt with
 built-in retry logic (up to 5 attempts).
 """
+
 import asyncio
 
 from tx_verify import verify_dashen
