@@ -36,7 +36,7 @@ jobs:
 
       - name: Validate version matches tag
         run: |
-          PKG_VERSION=$(python -c "import runpy; print(runpy.run_path('tx_verify/__init__.py')['__version__'])")
+          PKG_VERSION=$(python -c "import re; print(re.search(r'__version__ = \\\"([^\\\"]+)\\\"', open('tx_verify/__init__.py').read()).group(1))")
           if [ "$PKG_VERSION" != "${{ steps.version.outputs.version }}" ]; then
             echo "ERROR: pyproject.toml version ($PKG_VERSION) != tag version (${{ steps.version.outputs.version }})"
             exit 1
