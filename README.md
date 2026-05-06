@@ -321,6 +321,9 @@ cd tx-verify
 # Install with dev dependencies
 pip install -e ".[dev]"
 
+# Install pre-commit hooks
+pre-commit install
+
 # Lint & format
 ruff check .
 ruff format .

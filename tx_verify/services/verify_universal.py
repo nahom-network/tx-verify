@@ -64,7 +64,9 @@ async def verify_universal(
                     error="Dashen bank verification expects only a reference number. Exclude suffix and phoneNumber.",
                 )
             dashen_result = await verify_dashen(trimmed, proxies=proxies)
-            return UniversalResult(success=dashen_result.success, data=dashen_result, error=dashen_result.error)
+            return UniversalResult(
+                success=dashen_result.success, data=dashen_result, error=dashen_result.error
+            )
 
         # --- CBE & ABYSSINIA ---
         if length == 12 and trimmed.upper().startswith("FT"):
@@ -76,10 +78,14 @@ async def verify_universal(
             trimmed_suffix = suffix.strip()
             if len(trimmed_suffix) == 8:
                 cbe_result = await verify_cbe(trimmed, trimmed_suffix, proxies=proxies)
-                return UniversalResult(success=cbe_result.success, data=cbe_result, error=cbe_result.error)
+                return UniversalResult(
+                    success=cbe_result.success, data=cbe_result, error=cbe_result.error
+                )
             elif len(trimmed_suffix) == 5:
                 aby_result = await verify_abyssinia(trimmed, trimmed_suffix, proxies=proxies)
-                return UniversalResult(success=aby_result.success, data=aby_result, error=aby_result.error)
+                return UniversalResult(
+                    success=aby_result.success, data=aby_result, error=aby_result.error
+                )
             else:
                 return UniversalResult(
                     success=False,
