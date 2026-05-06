@@ -63,8 +63,8 @@ async def verify_universal(
                     success=False,
                     error="Dashen bank verification expects only a reference number. Exclude suffix and phoneNumber.",
                 )
-            result = await verify_dashen(trimmed, proxies=proxies)
-            return UniversalResult(success=result.success, data=result, error=result.error)
+            dashen_result = await verify_dashen(trimmed, proxies=proxies)
+            return UniversalResult(success=dashen_result.success, data=dashen_result, error=dashen_result.error)
 
         # --- CBE & ABYSSINIA ---
         if length == 12 and trimmed.upper().startswith("FT"):
@@ -75,11 +75,11 @@ async def verify_universal(
                 )
             trimmed_suffix = suffix.strip()
             if len(trimmed_suffix) == 8:
-                result = await verify_cbe(trimmed, trimmed_suffix, proxies=proxies)
-                return UniversalResult(success=result.success, data=result, error=result.error)
+                cbe_result = await verify_cbe(trimmed, trimmed_suffix, proxies=proxies)
+                return UniversalResult(success=cbe_result.success, data=cbe_result, error=cbe_result.error)
             elif len(trimmed_suffix) == 5:
-                result = await verify_abyssinia(trimmed, trimmed_suffix, proxies=proxies)
-                return UniversalResult(success=result.success, data=result, error=result.error)
+                aby_result = await verify_abyssinia(trimmed, trimmed_suffix, proxies=proxies)
+                return UniversalResult(success=aby_result.success, data=aby_result, error=aby_result.error)
             else:
                 return UniversalResult(
                     success=False,
@@ -101,19 +101,15 @@ async def verify_universal(
 
             if phone_number:
                 trimmed_phone = phone_number.strip()
-                if (
-                    not trimmed_phone.startswith("251")
-                    or len(trimmed_phone) > 12
-                    or len(trimmed_phone) < 10
-                ):
+                if not re.match(r"^09\d{8}$", trimmed_phone):
                     return UniversalResult(
                         success=False,
-                        error="Invalid phone number format. Must start with 251 and be 12 digits long.",
+                        error="Invalid phone number format. Must be a local Ethiopian number starting with 09 and 10 digits long.",
                     )
-                cbe_result = await verify_cbe_birr(trimmed, trimmed_phone, proxies=proxies)
-                if isinstance(cbe_result, CBEBirrError):
-                    return UniversalResult(success=False, error=cbe_result.error)
-                return UniversalResult(success=True, data=cbe_result)
+                cbe_birr_result = await verify_cbe_birr(trimmed, trimmed_phone, proxies=proxies)
+                if isinstance(cbe_birr_result, CBEBirrError):
+                    return UniversalResult(success=False, error=cbe_birr_result.error)
+                return UniversalResult(success=True, data=cbe_birr_result)
             else:
                 telebirr_result = await verify_telebirr(trimmed, proxies=proxies)
                 if not telebirr_result:

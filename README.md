@@ -1,5 +1,6 @@
 # tx-verify
 
+[![PyPI](https://img.shields.io/pypi/v/tx-verify.svg)](https://pypi.org/project/tx-verify/)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
 
@@ -22,7 +23,7 @@ anywhere Python does.
 | Telebirr           | `verify_telebirr()`  | `reference="CE12345678"`                |
 | Dashen Bank        | `verify_dashen()`    | `transaction_reference="123…"` (16 dig) |
 | Bank of Abyssinia  | `verify_abyssinia()` | `reference="FT…"`, `suffix="…"` (5 dig) |
-| CBE Birr           | `verify_cbe_birr()`  | `receipt="…"`, `phone="251…"`           |
+| CBE Birr           | `verify_cbe_birr()`  | `receipt="…"`, `phone="09…"` (local)  |
 | M-Pesa             | `verify_mpesa()`     | `transaction_id="UE20VG1GS8"`           |
 | Image (Mistral AI) | `verify_image()`     | `image_bytes`, auto-detects provider    |
 | Universal          | `verify_universal()` | `reference` — auto-routes by format     |
@@ -109,9 +110,7 @@ result = await verify_cbe("FT23062669JJ", "12345678")
 ### Telebirr
 
 Telebirr references are **10-character alphanumeric** codes. The library scrapes
-the public Ethio Telecom receipt page. It tries the primary source first,
-then any fallback proxies configured via the `FALLBACK_PROXIES` environment
-variable.
+the public Ethio Telecom receipt page.
 
 ```python
 from tx_verify import verify_telebirr
@@ -149,20 +148,19 @@ result = await verify_abyssinia("FT23062669JJ", "90172")
 ### CBE Birr
 
 CBE Birr receipts are **10-character alphanumeric** codes. You also need the
-wallet phone number in international format (`251…`).
+wallet phone number in **local Ethiopian format** (e.g. `0911234567`).
 
 ```python
 from tx_verify import verify_cbe_birr
 
-result = await verify_cbe_birr("AB1234CD56", "251911234567")
+result = await verify_cbe_birr("AB1234CD56", "0911234567")
 # result.customer_name, result.amount, result.paid_amount, …
 ```
 
 ### M-Pesa
 
 M-Pesa references are **10-character alphanumeric** codes. The verifier hits
-the Safaricom primary API first, then falls back to a proxy if configured via
-`MPESA_PROXY_KEY`.
+the Safaricom primary API.
 
 ```python
 from tx_verify import verify_mpesa
@@ -306,14 +304,10 @@ from tx_verify.utils.error_handler import AppError, ErrorType
 
 ## Environment Variables
 
-| Variable                    | Purpose                                                  |
-| --------------------------- | -------------------------------------------------------- |
-| `FALLBACK_PROXIES`          | Comma-separated proxy URLs for Telebirr                  |
-| `TELEBIRR_PROXY_KEY`        | API key for Telebirr proxy endpoints                     |
-| `SKIP_PRIMARY_VERIFICATION` | Set to `true` to skip primary source (Telebirr / M-Pesa) |
-| `MPESA_PROXY_KEY`           | API key for M-Pesa fallback proxy                        |
-| `MISTRAL_API_KEY`           | Required for `verify_image()`                            |
-| `LOG_LEVEL`                 | `DEBUG` or `INFO` (default `INFO`)                       |
+| Variable          | Purpose                       |
+| ----------------- | ----------------------------- |
+| `MISTRAL_API_KEY` | Required for `verify_image()` |
+| `LOG_LEVEL`       | `DEBUG` or `INFO` (default `INFO`) |
 
 ---
 

@@ -2,7 +2,6 @@
 
 import base64
 import io
-import os
 import re
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -208,50 +207,36 @@ async def verify_mpesa(
     primary_url = (
         f"https://m-pesabusiness.safaricom.et/api/receipt/getReceipt?trxNo={transaction_id}"
     )
-    skip_primary = os.getenv("SKIP_PRIMARY_VERIFICATION") == "true"
-
     try:
-        data: Any = None
-
-        if not skip_primary:
-            try:
-                data = await _fetch_from_url(primary_url, "primary API", proxies=proxies)
-            except Exception as e:
-                logger.warning("⚠️ Primary M-Pesa fetch failed: %s. Trying fallback proxy...", e)
-        else:
-            logger.info("⏭️ Skipping primary verifier due to SKIP_PRIMARY_VERIFICATION=true")
-
-        if not data:
-            return MpesaVerifyResult(
-                success=False,
-                error="Failed to fetch M-Pesa receipt from both primary and fallback sources.",
-            )
-
-        logger.info(
-            "📡 API Response Code: %s, Description: %s",
-            data.get("responseCode"),
-            data.get("responseDescription"),
+        data = await _fetch_from_url(primary_url, "primary API", proxies=proxies)
+    except Exception as e:
+        logger.warning("⚠️ Primary M-Pesa fetch failed: %s", e)
+        return MpesaVerifyResult(
+            success=False,
+            error="Failed to fetch M-Pesa receipt.",
         )
 
-        if data.get("responseCode") == "0" and data.get("base64Data"):
-            logger.info("✅ API returned success and base64 data. Converting to buffer...")
-            try:
-                pdf_bytes = base64.b64decode(data["base64Data"])
-                logger.info("📦 PDF Buffer created (%d bytes). Parsing PDF...", len(pdf_bytes))
-                return _parse_mpesa_receipt(pdf_bytes)
-            except Exception as e:
-                logger.error("❌ Failed to convert/parse base64 PDF: %s", e)
-                return MpesaVerifyResult(success=False, error=f"Failed to process PDF data: {e}")
-        else:
-            logger.warning("⚠️ M-Pesa returned unsuccessful code or missing data")
-            return MpesaVerifyResult(
-                success=False,
-                error=f"API Error: {data.get('responseDescription', 'Unknown error')}",
-            )
+    logger.info(
+        "📡 API Response Code: %s, Description: %s",
+        data.get("responseCode"),
+        data.get("responseDescription"),
+    )
 
-    except Exception as e:
-        logger.error("❌ M-Pesa verification failed: %s", e)
-        return MpesaVerifyResult(success=False, error=f"Request failed: {e}")
+    if data.get("responseCode") == "0" and data.get("base64Data"):
+        logger.info("✅ API returned success and base64 data. Converting to buffer...")
+        try:
+            pdf_bytes = base64.b64decode(data["base64Data"])
+            logger.info("📦 PDF Buffer created (%d bytes). Parsing PDF...", len(pdf_bytes))
+            return _parse_mpesa_receipt(pdf_bytes)
+        except Exception as e:
+            logger.error("❌ Failed to convert/parse base64 PDF: %s", e)
+            return MpesaVerifyResult(success=False, error=f"Failed to process PDF data: {e}")
+    else:
+        logger.warning("⚠️ M-Pesa returned unsuccessful code or missing data")
+        return MpesaVerifyResult(
+            success=False,
+            error=f"API Error: {data.get('responseDescription', 'Unknown error')}",
+        )
 
 
 def _parse_mpesa_receipt(pdf_bytes: bytes) -> MpesaVerifyResult:

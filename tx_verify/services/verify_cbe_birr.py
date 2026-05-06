@@ -228,7 +228,7 @@ def _parse_cbe_birr_receipt(pdf_text: str) -> CBEBirrReceipt | None:
             #  Paid amount      Service Charge     VAT      Total Paid Amount
             elif "Receipt Number" in line and "Transaction Date" in line and "Amount" in line:
                 j = i + 1
-                vals = []
+                vals: list[str] = []
                 while j < len(lines) and len(vals) < 3:
                     val = lines[j].strip()
                     if val and val not in known_labels:
@@ -240,7 +240,7 @@ def _parse_cbe_birr_receipt(pdf_text: str) -> CBEBirrReceipt | None:
                     amount = vals[2]
 
                 # Financial breakdown: 4 consecutive numeric values
-                fin_vals = []
+                fin_vals: list[str] = []
                 while j < len(lines) and len(fin_vals) < 4:
                     val = lines[j].strip()
                     if re.match(r"^[\d.]+$", val):

@@ -285,7 +285,7 @@ async def _fetch_from_primary_source(
 async def verify_telebirr(
     reference: str, *, proxies: str | dict[str, str] | None = None
 ) -> TelebirrReceipt | None:
-    """Verify a Telebirr transaction using primary source then fallback proxies.
+    """Verify a Telebirr transaction.
 
     Args:
         reference: Telebirr transaction reference.
@@ -299,7 +299,7 @@ async def verify_telebirr(
     if primary_result and _is_valid_receipt(primary_result):
         return primary_result
     logger.error(
-        "All primary and proxy verification methods failed for reference: %s",
+        "Primary verification failed for reference: %s",
         reference,
     )
     return None

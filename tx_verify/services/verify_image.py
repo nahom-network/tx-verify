@@ -116,9 +116,9 @@ async def verify_image(
         ref = result["transaction_number"]
         if auto_verify:
             try:
-                data = await verify_telebirr(ref, proxies=proxies)
+                telebirr_data = await verify_telebirr(ref, proxies=proxies)
                 return ImageVerifyResult(
-                    verified=True, type="telebirr", reference=ref, details=data
+                    verified=True, type="telebirr", reference=ref, details=telebirr_data
                 )
             except Exception as ve:
                 logger.error("Telebirr verification failed: %s", ve)
@@ -147,8 +147,8 @@ async def verify_image(
                 error="Account suffix is required for CBE verification in autoVerify mode"
             )
         try:
-            data = await verify_cbe(ref, account_suffix, proxies=proxies)
-            return ImageVerifyResult(verified=True, type="cbe", reference=ref, details=data)
+            cbe_data = await verify_cbe(ref, account_suffix, proxies=proxies)
+            return ImageVerifyResult(verified=True, type="cbe", reference=ref, details=cbe_data)
         except Exception as ve:
             logger.error("CBE verification failed: %s", ve)
             return ImageVerifyResult(error="Verification failed for CBE")

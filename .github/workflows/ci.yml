@@ -24,8 +24,8 @@ jobs:
       - name: Check formatting
         run: ruff format --check .
 
-      - name: Install mypy
-        run: pip install mypy
+      - name: Install dependencies
+        run: pip install ".[dev]"
 
       - name: Type check
         run: mypy tx_verify/
