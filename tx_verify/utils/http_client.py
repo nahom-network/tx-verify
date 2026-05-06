@@ -76,7 +76,7 @@ def _build_proxies(
 
     Returns:
         ``None`` when no proxy is configured, otherwise a ``str`` (single URL)
-        or ``dict`` mapping scheme → URL for httpx's ``proxies=`` kwarg.
+        or ``dict`` mapping scheme → URL for httpx's ``proxy=`` kwarg.
 
     Raises:
         TypeError: if ``proxies`` is neither ``str`` nor ``dict``.
@@ -160,7 +160,7 @@ def get_async_client(
     client = httpx.AsyncClient(
         timeout=httpx.Timeout(timeout),
         verify=verify,
-        proxies=cast(Any, resolved),
+        proxy=cast(Any, resolved),
         headers=headers,
         **httpx_kwargs,
     )
@@ -196,7 +196,7 @@ def get_sync_client(
     client = httpx.Client(
         timeout=httpx.Timeout(timeout),
         verify=verify,
-        proxies=cast(Any, resolved),
+        proxy=cast(Any, resolved),
         headers=headers,
         **httpx_kwargs,
     )
