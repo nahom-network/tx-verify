@@ -3,10 +3,7 @@
 import os
 from datetime import datetime
 
-import pytest
-
 from tx_verify.services.verify_mpesa import _parse_mpesa_receipt
-
 
 SAMPLES_DIR = os.path.join(os.path.dirname(__file__), "..", "internal")
 

@@ -6,7 +6,6 @@ a proxy server if needed.  Set MPESA_PROXY_KEY env var for fallback.
 """
 
 import asyncio
-import os
 
 from tx_verify import verify_mpesa
 

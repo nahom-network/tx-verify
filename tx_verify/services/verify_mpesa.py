@@ -204,7 +204,6 @@ async def verify_mpesa(transaction_id: str) -> MpesaVerifyResult:
     primary_url = (
         f"https://m-pesabusiness.safaricom.et/api/receipt/getReceipt?trxNo={transaction_id}"
     )
-    proxy_key = os.getenv("MPESA_PROXY_KEY", "")
     skip_primary = os.getenv("SKIP_PRIMARY_VERIFICATION") == "true"
 
     try:
