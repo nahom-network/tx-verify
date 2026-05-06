@@ -3,16 +3,15 @@
 Translated from src/services/verifyDashen.ts
 """
 
-import asyncio
 import io
 import re
 import ssl
 from dataclasses import dataclass
 from datetime import datetime
 
-import httpx
 from pypdf import PdfReader
 
+from tx_verify.utils.http_client import fetch_with_retry
 from tx_verify.utils.logger import logger
 
 
@@ -68,50 +67,36 @@ def _extract_amount(text: str, regex: re.Pattern[str]) -> float | None:
     return None
 
 
-async def verify_dashen(transaction_reference: str) -> DashenVerifyResult:
+async def verify_dashen(
+    transaction_reference: str, *, proxies: str | dict[str, str] | None = None
+) -> DashenVerifyResult:
     """Verify a Dashen Bank transaction with retry logic."""
     url = f"https://receipt.dashensuperapp.com/receipt/{transaction_reference}"
     max_retries = 5
     retry_delay = 2.0  # seconds
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.info(
-                "\U0001f50e Fetching Dashen receipt (Attempt %d/%d): %s",
-                attempt,
-                max_retries,
-                url,
-            )
-            async with httpx.AsyncClient(verify=_make_ssl_context(), timeout=60.0) as client:
-                response = await client.get(
-                    url,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                        "Accept": "application/pdf",
-                    },
-                )
-                response.raise_for_status()
-
-            logger.info("\u2705 Dashen receipt fetch success, parsing PDF")
-            return _parse_dashen_receipt(response.content)
-
-        except Exception as e:
-            logger.warning(
-                "\u26a0\ufe0f Dashen receipt fetch failed (Attempt %d/%d): %s",
-                attempt,
-                max_retries,
-                str(e),
-            )
-            if attempt == max_retries:
-                logger.error("\u274c All retry attempts failed for Dashen receipt.")
-                return DashenVerifyResult(
-                    success=False,
-                    error=f"Failed to fetch receipt after {max_retries} attempts: {e}",
-                )
-            logger.info("\u23f3 Waiting %.0fms before retry...", retry_delay * 1000)
-            await asyncio.sleep(retry_delay)
-
-    return DashenVerifyResult(success=False, error="Unknown error in retry loop")
+    try:
+        logger.info("\U0001f50e Fetching Dashen receipt: %s", url)
+        response = await fetch_with_retry(
+            url,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            verify=_make_ssl_context(),
+            timeout=60.0,
+            proxies=proxies,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Accept": "application/pdf",
+            },
+        )
+        logger.info("\u2705 Dashen receipt fetch success, parsing PDF")
+        return _parse_dashen_receipt(response.content)
+    except Exception as e:
+        logger.error("\u274c All retry attempts failed for Dashen receipt: %s", str(e))
+        return DashenVerifyResult(
+            success=False,
+            error=f"Failed to fetch receipt after {max_retries} attempts: {e}",
+        )
 
 
 def _parse_dashen_receipt(pdf_bytes: bytes) -> DashenVerifyResult:

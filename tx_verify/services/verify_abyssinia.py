@@ -9,6 +9,7 @@ from datetime import datetime
 import httpx
 
 from tx_verify.services.verify_cbe import VerifyResult
+from tx_verify.utils.http_client import get_async_client
 from tx_verify.utils.logger import logger
 
 
@@ -33,7 +34,9 @@ class AbyssiniaReceipt:
     total_amount_including_vat: str = ""
 
 
-async def verify_abyssinia(reference: str, suffix: str = "") -> VerifyResult:
+async def verify_abyssinia(
+    reference: str, suffix: str = "", *, proxies: str | dict[str, str] | None = None
+) -> VerifyResult:
     """Verify an Abyssinia bank transaction via their public API.
 
     Args:
@@ -52,7 +55,7 @@ async def verify_abyssinia(reference: str, suffix: str = "") -> VerifyResult:
         )
         logger.info("\U0001f4e1 Fetching from URL: %s", api_url)
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with get_async_client(timeout=30.0, proxies=proxies) as client:
             response = await client.get(
                 api_url,
                 headers={

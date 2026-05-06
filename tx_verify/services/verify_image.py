@@ -38,6 +38,8 @@ async def verify_image(
     auto_verify: bool = False,
     account_suffix: str | None = None,
     mime_type: str = "image/jpeg",
+    *,
+    proxies: str | dict[str, str] | None = None,
 ) -> ImageVerifyResult:
     """Analyse a payment receipt image using Mistral Vision and optionally auto-verify.
 
@@ -114,7 +116,7 @@ async def verify_image(
         ref = result["transaction_number"]
         if auto_verify:
             try:
-                data = await verify_telebirr(ref)
+                data = await verify_telebirr(ref, proxies=proxies)
                 return ImageVerifyResult(
                     verified=True, type="telebirr", reference=ref, details=data
                 )
@@ -145,7 +147,7 @@ async def verify_image(
                 error="Account suffix is required for CBE verification in autoVerify mode"
             )
         try:
-            data = await verify_cbe(ref, account_suffix)
+            data = await verify_cbe(ref, account_suffix, proxies=proxies)
             return ImageVerifyResult(verified=True, type="cbe", reference=ref, details=data)
         except Exception as ve:
             logger.error("CBE verification failed: %s", ve)

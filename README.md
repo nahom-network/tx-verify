@@ -221,6 +221,60 @@ print(result.success, result.data, result.error)
 
 ---
 
+## Proxy Support
+
+All receipt verifiers accept an explicit ``proxies`` argument.  **Environment
+variables are never read automatically** — you must pass the proxy yourself.
+
+Supported schemes:
+
+| Scheme   | Description                                    |
+| -------- | ---------------------------------------------- |
+| `http`   | Plain HTTP forward proxy                       |
+| `https`  | HTTPS proxy (CONNECT tunnel)                   |
+| `socks4` | SOCKS4 proxy                                   |
+| `socks5` | SOCKS5 proxy (client resolves DNS)             |
+| `socks5h`| SOCKS5 proxy (proxy resolves DNS)              |
+
+Authentication is embedded in the URL:
+
+```python
+# Single global proxy
+proxies = "http://user:pass@proxy.example.com:8080"
+
+# Per-scheme mapping
+proxies = {
+    "http://":  "http://proxy.example.com:8080",
+    "https://": "socks5://localhost:1080",
+}
+```
+
+Pass it to any verifier:
+
+```python
+from tx_verify import verify_telebirr, verify_cbe, verify_mpesa
+
+# Telebirr through an HTTP proxy
+receipt = await verify_telebirr("CE12345678", proxies="http://proxy:8080")
+
+# CBE through SOCKS5
+result = await verify_cbe("FT23062669JJ", "12345678", proxies="socks5://127.0.0.1:1080")
+
+# M-Pesa with per-scheme mapping
+result = await verify_mpesa("UE20VG1GS8", proxies={
+    "http://": "http://proxy:8080",
+    "https://": "socks5h://proxy:1080",
+})
+```
+
+`verify_universal` and `verify_image` also forward ``proxies`` to the
+underlying provider automatically.
+
+> **SOCKS tip:** `socks5h://` tells the proxy server to resolve hostnames,
+> which is useful when the client cannot reach DNS directly.
+
+---
+
 ## Error Handling
 
 All verifiers return **result objects** rather than raising for expected

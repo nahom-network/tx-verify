@@ -3,13 +3,12 @@
 Translated from src/services/verifyTelebirr.ts
 """
 
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
 from bs4 import BeautifulSoup
 
+from tx_verify.utils.http_client import get_async_client
 from tx_verify.utils.logger import logger
 
 
@@ -232,10 +231,21 @@ def _parse_telebirr_json(json_data: Any) -> TelebirrReceipt | None:
 
         # Any leftover keys that aren't core go into meta
         core_json_keys = {
-            "payerName", "payerTelebirrNo", "creditedPartyName",
-            "creditedPartyAccountNo", "transactionStatus", "receiptNo",
-            "paymentDate", "settledAmount", "serviceFee", "serviceFeeVAT",
-            "totalPaidAmount", "bankName", "success", "error", "details",
+            "payerName",
+            "payerTelebirrNo",
+            "creditedPartyName",
+            "creditedPartyAccountNo",
+            "transactionStatus",
+            "receiptNo",
+            "paymentDate",
+            "settledAmount",
+            "serviceFee",
+            "serviceFeeVAT",
+            "totalPaidAmount",
+            "bankName",
+            "success",
+            "error",
+            "details",
         }
         for key, val in d.items():
             if key not in core_json_keys and val:
@@ -251,11 +261,13 @@ def _is_valid_receipt(receipt: TelebirrReceipt) -> bool:
     return bool(receipt.receipt_no and receipt.payer_name and receipt.transaction_status)
 
 
-async def _fetch_from_primary_source(reference: str, base_url: str) -> TelebirrReceipt | None:
+async def _fetch_from_primary_source(
+    reference: str, base_url: str, *, proxies: str | dict[str, str] | None = None
+) -> TelebirrReceipt | None:
     url = f"{base_url}{reference}"
     try:
         logger.info("Attempting to fetch Telebirr receipt from primary source: %s", url)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with get_async_client(timeout=30.0, proxies=proxies) as client:
             response = await client.get(url)
         logger.debug("Received response with status: %s", response.status_code)
 
@@ -270,95 +282,22 @@ async def _fetch_from_primary_source(reference: str, base_url: str) -> TelebirrR
         return None
 
 
-async def _fetch_from_proxy_source(reference: str, proxy_url: str) -> TelebirrReceipt | None:
-    proxy_key = os.getenv("TELEBIRR_PROXY_KEY", "")
-    url = f"{proxy_url}{reference}"
-    if proxy_key:
-        url += f"&key={proxy_key}"
+async def verify_telebirr(
+    reference: str, *, proxies: str | dict[str, str] | None = None
+) -> TelebirrReceipt | None:
+    """Verify a Telebirr transaction using primary source then fallback proxies.
 
-    try:
-        logger.info("Attempting to fetch Telebirr receipt from proxy: %s", url)
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                url,
-                headers={
-                    "Accept": "application/json",
-                    "User-Agent": "VerifierAPI/1.0",
-                },
-            )
-        logger.debug("Received proxy response with status: %s", response.status_code)
-
-        # Try JSON first
-        try:
-            data = response.json()
-        except Exception:
-            logger.warning("Proxy response is not valid JSON, attempting to scrape as HTML")
-            return _scrape_telebirr_receipt(response.text)
-
-        if isinstance(data, dict) and data.get("success") is False and data.get("error"):
-            raise TelebirrVerificationError(data["error"], data.get("details"))
-
-        extracted = _parse_telebirr_json(data)
-        if not extracted:
-            logger.warning("Failed to parse JSON from proxy, attempting HTML scrape")
-            return _scrape_telebirr_receipt(response.text)
-
-        logger.info(
-            "Successfully extracted Telebirr data from proxy for reference: %s",
-            reference,
-        )
-        return extracted
-
-    except TelebirrVerificationError:
-        raise
-    except httpx.ConnectError as e:
-        raise TelebirrVerificationError(
-            "The fallback proxy server is unreachable or timed out.",
-            str(e),
-        ) from e
-    except httpx.TimeoutException as e:
-        raise TelebirrVerificationError(
-            "The fallback proxy server is unreachable or timed out.",
-            str(e),
-        ) from e
-    except Exception as e:
-        logger.error("Error fetching Telebirr receipt from proxy %s: %s", url, e)
-        return None
-
-
-async def verify_telebirr(reference: str) -> TelebirrReceipt | None:
-    """Verify a Telebirr transaction using primary source then fallback proxies."""
+    Args:
+        reference: Telebirr transaction reference.
+        proxies: Optional proxy URL or per-scheme mapping for HTTP requests.
+            Example: ``"http://proxy.example.com:8080"`` or
+            ``{"http://": "socks5://localhost:1080"}``.
+    """
     primary_url = "https://transactioninfo.ethiotelecom.et/receipt/"
 
-    env_proxies = os.getenv("FALLBACK_PROXIES", "")
-    fallback_proxies = [u.strip() for u in env_proxies.split(",") if u.strip()]
-    skip_primary = os.getenv("SKIP_PRIMARY_VERIFICATION") == "true"
-
-    if not skip_primary:
-        logger.info("Attempting primary verification for: %s", reference)
-        primary_result = await _fetch_from_primary_source(reference, primary_url)
-        if primary_result and _is_valid_receipt(primary_result):
-            return primary_result
-        logger.warning("Primary verification failed. Moving to fallback proxy pool...")
-    else:
-        logger.info("Skipping primary verifier (SKIP_PRIMARY_VERIFICATION=true).")
-
-    if not fallback_proxies and skip_primary:
-        logger.error("CRITICAL: Primary check skipped, but no FALLBACK_PROXIES defined!")
-        return None
-
-    for proxy_url in fallback_proxies:
-        try:
-            logger.info("Attempting verification with proxy: %s", proxy_url)
-            result = await _fetch_from_proxy_source(reference, proxy_url)
-            if result and _is_valid_receipt(result):
-                logger.info("Successfully verified using proxy: %s", proxy_url)
-                return result
-        except TelebirrVerificationError:
-            raise
-        except Exception:
-            logger.warning("Proxy %s failed or timed out. Trying next...", proxy_url)
-
+    primary_result = await _fetch_from_primary_source(reference, primary_url, proxies=proxies)
+    if primary_result and _is_valid_receipt(primary_result):
+        return primary_result
     logger.error(
         "All primary and proxy verification methods failed for reference: %s",
         reference,

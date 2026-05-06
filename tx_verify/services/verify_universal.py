@@ -33,6 +33,8 @@ async def verify_universal(
     reference: str,
     suffix: str | None = None,
     phone_number: str | None = None,
+    *,
+    proxies: str | dict[str, str] | None = None,
 ) -> UniversalResult:
     """Route a verification request to the correct provider based on reference format.
 
@@ -61,7 +63,7 @@ async def verify_universal(
                     success=False,
                     error="Dashen bank verification expects only a reference number. Exclude suffix and phoneNumber.",
                 )
-            result = await verify_dashen(trimmed)
+            result = await verify_dashen(trimmed, proxies=proxies)
             return UniversalResult(success=result.success, data=result, error=result.error)
 
         # --- CBE & ABYSSINIA ---
@@ -73,10 +75,10 @@ async def verify_universal(
                 )
             trimmed_suffix = suffix.strip()
             if len(trimmed_suffix) == 8:
-                result = await verify_cbe(trimmed, trimmed_suffix)
+                result = await verify_cbe(trimmed, trimmed_suffix, proxies=proxies)
                 return UniversalResult(success=result.success, data=result, error=result.error)
             elif len(trimmed_suffix) == 5:
-                result = await verify_abyssinia(trimmed, trimmed_suffix)
+                result = await verify_abyssinia(trimmed, trimmed_suffix, proxies=proxies)
                 return UniversalResult(success=result.success, data=result, error=result.error)
             else:
                 return UniversalResult(
@@ -108,12 +110,12 @@ async def verify_universal(
                         success=False,
                         error="Invalid phone number format. Must start with 251 and be 12 digits long.",
                     )
-                cbe_result = await verify_cbe_birr(trimmed, trimmed_phone)
+                cbe_result = await verify_cbe_birr(trimmed, trimmed_phone, proxies=proxies)
                 if isinstance(cbe_result, CBEBirrError):
                     return UniversalResult(success=False, error=cbe_result.error)
                 return UniversalResult(success=True, data=cbe_result)
             else:
-                telebirr_result = await verify_telebirr(trimmed)
+                telebirr_result = await verify_telebirr(trimmed, proxies=proxies)
                 if not telebirr_result:
                     return UniversalResult(
                         success=False,

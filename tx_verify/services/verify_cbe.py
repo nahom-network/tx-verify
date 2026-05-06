@@ -9,9 +9,9 @@ import ssl
 from dataclasses import dataclass
 from datetime import datetime
 
-import httpx
 from pypdf import PdfReader
 
+from tx_verify.utils.http_client import get_async_client
 from tx_verify.utils.logger import logger
 
 
@@ -43,7 +43,9 @@ def _make_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
-async def verify_cbe(reference: str, account_suffix: str = "") -> VerifyResult:
+async def verify_cbe(
+    reference: str, account_suffix: str = "", *, proxies: str | dict[str, str] | None = None
+) -> VerifyResult:
     """Verify a CBE transaction by fetching and parsing its PDF receipt.
 
     First attempts a direct HTTPS fetch; on failure would fall back to
@@ -54,7 +56,7 @@ async def verify_cbe(reference: str, account_suffix: str = "") -> VerifyResult:
 
     try:
         logger.info("\U0001f50e Attempting direct fetch: %s", url)
-        async with httpx.AsyncClient(verify=_make_ssl_context(), timeout=30.0) as client:
+        async with get_async_client(verify=_make_ssl_context(), timeout=30.0, proxies=proxies) as client:
             response = await client.get(
                 url,
                 headers={

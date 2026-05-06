@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-import httpx
 from pypdf import PdfReader
 
+from tx_verify.utils.http_client import get_async_client
 from tx_verify.utils.logger import logger
 
 
@@ -185,9 +185,11 @@ def _parse_receipt_lines(lines: list[str]) -> tuple[dict[str, Any], dict[str, An
 # ---------------------------------------------------------------------------
 
 
-async def _fetch_from_url(url: str, source: str) -> Any:
+async def _fetch_from_url(
+    url: str, source: str, *, proxies: str | dict[str, str] | None = None
+) -> Any:
     logger.info("🔎 Fetching receipt data from %s: %s", source, url)
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with get_async_client(timeout=60.0, proxies=proxies) as client:
         response = await client.get(
             url,
             headers={
@@ -199,7 +201,9 @@ async def _fetch_from_url(url: str, source: str) -> Any:
     return response.json()
 
 
-async def verify_mpesa(transaction_id: str) -> MpesaVerifyResult:
+async def verify_mpesa(
+    transaction_id: str, *, proxies: str | dict[str, str] | None = None
+) -> MpesaVerifyResult:
     """Verify an M-Pesa transaction."""
     primary_url = (
         f"https://m-pesabusiness.safaricom.et/api/receipt/getReceipt?trxNo={transaction_id}"
@@ -211,7 +215,7 @@ async def verify_mpesa(transaction_id: str) -> MpesaVerifyResult:
 
         if not skip_primary:
             try:
-                data = await _fetch_from_url(primary_url, "primary API")
+                data = await _fetch_from_url(primary_url, "primary API", proxies=proxies)
             except Exception as e:
                 logger.warning("⚠️ Primary M-Pesa fetch failed: %s. Trying fallback proxy...", e)
         else:

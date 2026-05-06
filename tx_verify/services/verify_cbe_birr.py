@@ -8,9 +8,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-import httpx
 from pypdf import PdfReader
 
+from tx_verify.utils.http_client import get_async_client
 from tx_verify.utils.logger import logger
 
 
@@ -46,7 +46,9 @@ class CBEBirrError:
     error: str = ""
 
 
-async def verify_cbe_birr(receipt_number: str, phone_number: str) -> CBEBirrReceipt | CBEBirrError:
+async def verify_cbe_birr(
+    receipt_number: str, phone_number: str, *, proxies: str | dict[str, str] | None = None
+) -> CBEBirrReceipt | CBEBirrError:
     """Verify a CBE Birr transaction by fetching and parsing its PDF receipt."""
     try:
         logger.info(
@@ -58,7 +60,7 @@ async def verify_cbe_birr(receipt_number: str, phone_number: str) -> CBEBirrRece
         url = f"https://cbepay1.cbe.com.et/aureceipt?TID={receipt_number}&PH={phone_number}"
         logger.info("[CBEBirr] Fetching PDF from: %s", url)
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with get_async_client(timeout=30.0, proxies=proxies) as client:
             response = await client.get(
                 url,
                 headers={
