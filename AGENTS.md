@@ -77,10 +77,13 @@ Adding a provider: create `tx_verify/services/verify_<provider>.py`, export from
 
 ## Release flow
 
-1. Bump `__version__` in `tx_verify/__init__.py`.
-2. Commit and push.
-3. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
-4. GitHub Actions validates the tag matches `__version__`, builds the wheel, and publishes to PyPI via trusted publishing.
+Releases are fully automated with **python-semantic-release**. Merging conventional commits to `main` triggers the pipeline.
+
+1. Merge a PR with conventional commits (`feat:`, `fix:`, `perf:`, `BREAKING CHANGE:`, etc.).
+2. The `release.yml` workflow runs on push to `main`, bumps `__version__` in `tx_verify/__init__.py`, updates `CHANGELOG.md`, commits, tags, creates a GitHub release, and attaches build artifacts.
+3. The new tag triggers `publish.yml`, which validates the version matches the tag, builds the wheel, and publishes to PyPI via trusted publishing.
+
+**Note:** If branch protection rules block direct pushes to `main`, the `release.yml` workflow will fail. In that case, configure a Personal Access Token (PAT) with repo write access and set it as the `GH_TOKEN` secret, then update `release.yml` to use `token: ${{ secrets.GH_TOKEN }}` instead of `GITHUB_TOKEN`.
 
 ## Runtime conventions
 

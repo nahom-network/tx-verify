@@ -54,6 +54,7 @@ dev = [
     "build>=1.2.0",
     "twine>=5.0.0",
     "pre-commit>=3.0.0",
+    "python-semantic-release>=9.0.0",
 ]
 
 [project.urls]
@@ -123,3 +124,17 @@ ignore_missing_imports = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# python-semantic-release (automatic changelogs & versioning)
+# ---------------------------------------------------------------------------
+[tool.semantic_release]
+version_variables = ["tx_verify/__init__.py:__version__"]
+branch = "main"
+changelog_file = "CHANGELOG.md"
+build_command = "python -m build"
+dist_path = "dist/"
+upload_to_pypi = false
+upload_to_release = true
+commit_message = "chore(release): bump version to {version} [skip ci]"
+major_on_zero = false
