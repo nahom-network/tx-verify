@@ -23,7 +23,7 @@ anywhere Python does.
 | Telebirr           | `verify_telebirr()`  | `reference="CE12345678"`                |
 | Dashen Bank        | `verify_dashen()`    | `transaction_reference="123…"` (16 dig) |
 | Bank of Abyssinia  | `verify_abyssinia()` | `reference="FT…"`, `suffix="…"` (5 dig) |
-| CBE Birr           | `verify_cbe_birr()`  | `receipt="…"`, `phone="09…"` (local)  |
+| CBE Birr           | `verify_cbe_birr()`  | `receipt="…"`, `phone="09…"` (local)    |
 | M-Pesa             | `verify_mpesa()`     | `transaction_id="UE20VG1GS8"`           |
 | Image (Mistral AI) | `verify_image()`     | `image_bytes`, auto-detects provider    |
 | Universal          | `verify_universal()` | `reference` — auto-routes by format     |
@@ -221,18 +221,18 @@ print(result.success, result.data, result.error)
 
 ## Proxy Support
 
-All receipt verifiers accept an explicit ``proxies`` argument.  **Environment
+All receipt verifiers accept an explicit `proxies` argument. **Environment
 variables are never read automatically** — you must pass the proxy yourself.
 
 Supported schemes:
 
-| Scheme   | Description                                    |
-| -------- | ---------------------------------------------- |
-| `http`   | Plain HTTP forward proxy                       |
-| `https`  | HTTPS proxy (CONNECT tunnel)                   |
-| `socks4` | SOCKS4 proxy                                   |
-| `socks5` | SOCKS5 proxy (client resolves DNS)             |
-| `socks5h`| SOCKS5 proxy (proxy resolves DNS)              |
+| Scheme    | Description                        |
+| --------- | ---------------------------------- |
+| `http`    | Plain HTTP forward proxy           |
+| `https`   | HTTPS proxy (CONNECT tunnel)       |
+| `socks4`  | SOCKS4 proxy                       |
+| `socks5`  | SOCKS5 proxy (client resolves DNS) |
+| `socks5h` | SOCKS5 proxy (proxy resolves DNS)  |
 
 Authentication is embedded in the URL:
 
@@ -265,7 +265,7 @@ result = await verify_mpesa("UE20VG1GS8", proxies={
 })
 ```
 
-`verify_universal` and `verify_image` also forward ``proxies`` to the
+`verify_universal` and `verify_image` also forward `proxies` to the
 underlying provider automatically.
 
 > **SOCKS tip:** `socks5h://` tells the proxy server to resolve hostnames,
@@ -304,9 +304,9 @@ from tx_verify.utils.error_handler import AppError, ErrorType
 
 ## Environment Variables
 
-| Variable          | Purpose                       |
-| ----------------- | ----------------------------- |
-| `MISTRAL_API_KEY` | Required for `verify_image()` |
+| Variable          | Purpose                            |
+| ----------------- | ---------------------------------- |
+| `MISTRAL_API_KEY` | Required for `verify_image()`      |
 | `LOG_LEVEL`       | `DEBUG` or `INFO` (default `INFO`) |
 
 ---
@@ -315,7 +315,7 @@ from tx_verify.utils.error_handler import AppError, ErrorType
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USERNAME/tx-verify.git
+git clone https://github.com/nahom-network/tx-verify.git
 cd tx-verify
 
 # Install with dev dependencies
