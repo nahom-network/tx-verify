@@ -1,6 +1,6 @@
 [project]
 name = "tx-verify"
-version = "0.1.1"
+version = "0.1.2"
 description = "Transaction Verification API — Python library for verifying Ethiopian payment transactions (CBE, Telebirr, Dashen, Abyssinia, CBE Birr, M-Pesa)."
 authors = [{name = "Nahom d"}]
 license = {text = "ISC"}
