@@ -4,10 +4,10 @@ Translated from src/services/verifyDashen.ts
 """
 
 import io
-import re
 import ssl
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from pypdf import PdfReader
 
@@ -26,7 +26,7 @@ class DashenVerifyResult:
     service_type: str | None = None
     narrative: str | None = None
     receiver_name: str | None = None
-    phone_no: str | None = None
+    receiver_account_number: str | None = None
     institution_name: str | None = None
     transaction_reference: str | None = None
     transfer_reference: str | None = None
@@ -34,14 +34,84 @@ class DashenVerifyResult:
     transaction_amount: float | None = None
     service_charge: float | None = None
     excise_tax: float | None = None
+    drrf_fee: float | None = None
     vat: float | None = None
     penalty_fee: float | None = None
     income_tax_fee: float | None = None
+    tax: float | None = None
     interest_fee: float | None = None
     stamp_duty: float | None = None
     discount_amount: float | None = None
     total: float | None = None
+    amount_in_words: str | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+
+
+# Labels that appear in the "Transaction Details" section as line pairs:
+# Label line followed by an "ETB <amount>" line.
+_DETAIL_LABELS: set[str] = {
+    "Transaction Amount",
+    "Service Charge",
+    "Excise Tax (15%)",
+    "DRRF Fee",
+    "VAT (15%)",
+    "Penalty Fee",
+    "Income Tax Fee",
+    "Tax",
+    "Interest Fee",
+    "Stamp Duty",
+    "Discount Amount",
+    "Total",
+}
+
+# Lines that mark the end of a multi-line value in the header section.
+_HEADER_STOP_LINES: set[str] = {
+    "Dashen Bank",
+    "Transaction Details",
+    "Terms & Conditions",
+    "For any support: please call us at",
+    "Dashen Bank S.C.",
+    "Always One Step Ahead!",
+}
+
+# Known typed attribute names (used to decide what goes into meta).
+_KNOWN_FIELDS: set[str] = {
+    "success",
+    "sender_name",
+    "sender_account_number",
+    "transaction_channel",
+    "service_type",
+    "narrative",
+    "receiver_name",
+    "receiver_account_number",
+    "institution_name",
+    "transaction_reference",
+    "transfer_reference",
+    "transaction_date",
+    "transaction_amount",
+    "service_charge",
+    "excise_tax",
+    "drrf_fee",
+    "vat",
+    "penalty_fee",
+    "income_tax_fee",
+    "tax",
+    "interest_fee",
+    "stamp_duty",
+    "discount_amount",
+    "total",
+    "amount_in_words",
+    "meta",
+    "error",
+}
+
+
+_KEY_REMAP: dict[str, str] = {
+    "instituton_name": "institution_name",
+    "excise_tax_15": "excise_tax",
+    "vat_15": "vat",
+}
 
 
 def _title_case(s: str) -> str:
@@ -55,16 +125,187 @@ def _make_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
-def _extract_amount(text: str, regex: re.Pattern[str]) -> float | None:
-    match = regex.search(text)
-    if match and match.group(1):
-        cleaned = match.group(1).replace(",", "")
+def _snake_case_label(label: str) -> str:
+    """Convert a PDF label like 'Excise Tax (15%)' to a snake-case key."""
+    return (
+        label.strip().lower().replace(" ", "_").replace("(", "").replace(")", "").replace("%", "")
+    )
+
+
+def _parse_amount(value: str) -> float | None:
+    """Parse an ETB amount string like 'ETB 100,000.00' or 'ETB 0'."""
+    cleaned = value.replace("ETB", "").replace(",", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _parse_date(value: str) -> datetime | None:
+    """Parse Dashen receipt date strings."""
+    value = value.strip()
+    formats = (
+        "%b %d, %Y, %I:%M:%S %p",
+        "%b %d, %Y %I:%M:%S %p",
+        "%m/%d/%Y, %I:%M:%S %p",
+        "%m/%d/%Y %I:%M:%S %p",
+        "%Y-%m-%d %H:%M:%S",
+        "%d/%m/%Y %H:%M:%S",
+    )
+    for fmt in formats:
         try:
-            val = float(cleaned)
-            return val
+            return datetime.strptime(value, fmt)
         except ValueError:
-            return None
+            continue
     return None
+
+
+def _extract_lines_from_pdf(pdf_bytes: bytes) -> list[str]:
+    """Return cleaned, non-empty lines from all pages of a PDF."""
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    lines: list[str] = []
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped:
+                lines.append(stripped)
+    return lines
+
+
+def _extract_fields(lines: list[str]) -> dict[str, str]:
+    """Build a flat field dictionary from receipt lines."""
+    fields: dict[str, str] = {}
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        lower = line.lower()
+
+        # Special case: "Amount in words:" may span multiple lines.
+        if lower.startswith("amount in words"):
+            value_lines: list[str] = []
+            i += 1
+            while i < len(lines):
+                nxt = lines[i]
+                if (
+                    nxt.endswith(":")
+                    or nxt in _DETAIL_LABELS
+                    or nxt.startswith("ETB")
+                    or nxt in _HEADER_STOP_LINES
+                ):
+                    break
+                value_lines.append(nxt)
+                i += 1
+            fields["amount_in_words"] = " ".join(value_lines).strip()
+            continue
+
+        # Transaction detail label followed by an ETB amount line.
+        if line in _DETAIL_LABELS and i + 1 < len(lines) and lines[i + 1].startswith("ETB"):
+            key = _snake_case_label(line)
+            fields[key] = lines[i + 1]
+            i += 2
+            continue
+
+        # Header label ending with ':' followed by a value on the next line(s).
+        if line.endswith(":"):
+            raw_key = line[:-1].strip().lower().replace(" ", "_").replace(".", "")
+            value_lines = []
+            i += 1
+            while i < len(lines):
+                nxt = lines[i]
+                if (
+                    nxt.endswith(":")
+                    or nxt in _DETAIL_LABELS
+                    or nxt.lower().startswith("amount in words")
+                    or nxt in _HEADER_STOP_LINES
+                ):
+                    break
+                value_lines.append(nxt)
+                i += 1
+            fields[raw_key] = " ".join(value_lines).strip()
+            continue
+
+        i += 1
+
+    return fields
+
+
+def _build_result(raw_fields: dict[str, str]) -> DashenVerifyResult:
+    """Map raw extracted fields into a typed DashenVerifyResult."""
+    meta: dict[str, Any] = {}
+    typed: dict[str, Any] = {}
+
+    for key, val in raw_fields.items():
+        remapped = _KEY_REMAP.get(key, key)
+
+        if remapped == "transaction_date":
+            typed[remapped] = _parse_date(val)
+        elif remapped in {
+            "transaction_amount",
+            "service_charge",
+            "excise_tax",
+            "drrf_fee",
+            "vat",
+            "penalty_fee",
+            "income_tax_fee",
+            "tax",
+            "interest_fee",
+            "stamp_duty",
+            "discount_amount",
+            "total",
+        }:
+            typed[remapped] = _parse_amount(val)
+        elif remapped in _KNOWN_FIELDS:
+            typed[remapped] = val
+        else:
+            meta[remapped] = val
+
+    # Required fields for success
+    tx_ref = typed.get("transaction_reference") or typed.get("transaction_ref")
+    tx_amt = typed.get("transaction_amount")
+    if tx_ref and tx_amt is not None:
+        success = True
+        error = None
+        logger.info("✅ PDF parsing successful - all required fields extracted")
+    else:
+        success = False
+        error = "Could not extract required fields (Transaction Reference and Amount) from PDF."
+        logger.warning("⚠️ PDF parsing failed - missing required fields")
+
+    # Format names
+    for name_key in ("sender_name", "receiver_name", "institution_name"):
+        if isinstance(typed.get(name_key), str):
+            typed[name_key] = _title_case(typed[name_key])
+
+    return DashenVerifyResult(
+        success=success,
+        sender_name=typed.get("sender_name"),
+        sender_account_number=typed.get("sender_account_number"),
+        transaction_channel=typed.get("transaction_channel"),
+        service_type=typed.get("service_type"),
+        narrative=typed.get("narrative"),
+        receiver_name=typed.get("receiver_name"),
+        receiver_account_number=typed.get("receiver_account_number"),
+        institution_name=typed.get("institution_name"),
+        transaction_reference=tx_ref,
+        transfer_reference=typed.get("transfer_reference"),
+        transaction_date=typed.get("transaction_date"),
+        transaction_amount=typed.get("transaction_amount"),
+        service_charge=typed.get("service_charge"),
+        excise_tax=typed.get("excise_tax"),
+        drrf_fee=typed.get("drrf_fee"),
+        vat=typed.get("vat"),
+        penalty_fee=typed.get("penalty_fee"),
+        income_tax_fee=typed.get("income_tax_fee"),
+        tax=typed.get("tax"),
+        interest_fee=typed.get("interest_fee"),
+        stamp_duty=typed.get("stamp_duty"),
+        discount_amount=typed.get("discount_amount"),
+        total=typed.get("total"),
+        amount_in_words=typed.get("amount_in_words"),
+        meta=meta,
+        error=error,
+    )
 
 
 async def verify_dashen(
@@ -76,7 +317,7 @@ async def verify_dashen(
     retry_delay = 2.0  # seconds
 
     try:
-        logger.info("\U0001f50e Fetching Dashen receipt: %s", url)
+        logger.info("🔎 Fetching Dashen receipt: %s", url)
         response = await fetch_with_retry(
             url,
             max_retries=max_retries,
@@ -84,15 +325,16 @@ async def verify_dashen(
             verify=_make_ssl_context(),
             timeout=60.0,
             proxies=proxies,
+            follow_redirects=True,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                 "Accept": "application/pdf",
             },
         )
-        logger.info("\u2705 Dashen receipt fetch success, parsing PDF")
+        logger.info("✅ Dashen receipt fetch success, parsing PDF")
         return _parse_dashen_receipt(response.content)
     except Exception as e:
-        logger.error("\u274c All retry attempts failed for Dashen receipt: %s", str(e))
+        logger.error("❌ All retry attempts failed for Dashen receipt: %s", str(e))
         return DashenVerifyResult(
             success=False,
             error=f"Failed to fetch receipt after {max_retries} attempts: {e}",
@@ -102,152 +344,16 @@ async def verify_dashen(
 def _parse_dashen_receipt(pdf_bytes: bytes) -> DashenVerifyResult:
     """Extract fields from a Dashen Bank PDF receipt."""
     try:
-        logger.info("\U0001f4ca PDF buffer size: %d bytes", len(pdf_bytes))
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        raw_text = ""
-        for page in reader.pages:
-            raw_text += page.extract_text() or ""
+        logger.info("📊 PDF buffer size: %d bytes", len(pdf_bytes))
+        logger.info("📄 Parsing Dashen receipt text")
 
-        raw_text = re.sub(r"\s+", " ", raw_text).strip()
-        logger.info("\U0001f4c4 Parsing Dashen receipt text")
-        logger.debug("\U0001f4dd Raw PDF text length: %d characters", len(raw_text))
+        lines = _extract_lines_from_pdf(pdf_bytes)
+        logger.debug("📝 Extracted %d lines from PDF", len(lines))
 
-        # Sender info
-        sender_name_m = re.search(
-            r"Sender\s*Name\s*:?\s*(.*?)\s+(?:Sender\s*Account|Account)", raw_text, re.I
-        )
-        sender_name = sender_name_m.group(1).strip() if sender_name_m else None
+        raw_fields = _extract_fields(lines)
+        logger.debug("📝 Extracted %d raw fields", len(raw_fields))
 
-        sender_account_m = re.search(
-            r"Sender\s*Account\s*(?:Number)?\s*:?\s*([A-Z0-9\*\-]+)", raw_text, re.I
-        )
-        sender_account_number = sender_account_m.group(1).strip() if sender_account_m else None
-
-        # Transaction details
-        channel_m = re.search(
-            r"Transaction\s*Channel\s*:?\s*(.*?)\s+(?:Service|Type)", raw_text, re.I
-        )
-        transaction_channel = channel_m.group(1).strip() if channel_m else None
-
-        service_m = re.search(
-            r"Service\s*Type\s*:?\s*(.*?)\s+(?:Narrative|Description)", raw_text, re.I
-        )
-        service_type = service_m.group(1).strip() if service_m else None
-
-        narrative_m = re.search(r"Narrative\s*:?\s*(.*?)\s+(?:Receiver|Phone)", raw_text, re.I)
-        narrative = narrative_m.group(1).strip() if narrative_m else None
-
-        # Receiver info
-        receiver_name_m = re.search(
-            r"Receiver\s*Name\s*:?\s*(.*?)\s+(?:Phone|Institution)", raw_text, re.I
-        )
-        receiver_name = receiver_name_m.group(1).strip() if receiver_name_m else None
-
-        phone_m = re.search(r"Phone\s*(?:No\.?|Number)?\s*:?\s*([+\d\-\s]+)", raw_text, re.I)
-        phone_no = phone_m.group(1).strip() if phone_m else None
-
-        institution_m = re.search(
-            r"Institution\s*Name\s*:?\s*(.*?)\s+(?:Transaction|Reference)", raw_text, re.I
-        )
-        institution_name = institution_m.group(1).strip() if institution_m else None
-
-        # References
-        tx_ref_m = re.search(r"Transaction\s*Reference\s*:?\s*([A-Z0-9\-]+)", raw_text, re.I)
-        transaction_ref = tx_ref_m.group(1).strip() if tx_ref_m else None
-
-        xfer_ref_m = re.search(r"Transfer\s*Reference\s*:?\s*([A-Z0-9\-]+)", raw_text, re.I)
-        transfer_reference = xfer_ref_m.group(1).strip() if xfer_ref_m else None
-
-        # Date
-        date_m = re.search(
-            r"Transaction\s*Date\s*(?:&\s*Time)?\s*:?\s*([\d/\-,: ]+(?:[APM]{2})?)", raw_text, re.I
-        )
-        date_raw = date_m.group(1).strip() if date_m else None
-        transaction_date: datetime | None = None
-        if date_raw:
-            for fmt in (
-                "%m/%d/%Y, %I:%M:%S %p",
-                "%m/%d/%Y %I:%M:%S %p",
-                "%Y-%m-%d %H:%M:%S",
-                "%d/%m/%Y %H:%M:%S",
-            ):
-                try:
-                    transaction_date = datetime.strptime(date_raw, fmt)
-                    break
-                except ValueError:
-                    continue
-
-        # Amounts
-        transaction_amount = _extract_amount(
-            raw_text, re.compile(r"Transaction\s*Amount\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I)
-        )
-        service_charge = _extract_amount(
-            raw_text, re.compile(r"Service\s*Charge\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I)
-        )
-        excise_tax = _extract_amount(
-            raw_text,
-            re.compile(r"Excise\s*Tax\s*(?:\(15%\))?\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I),
-        )
-        vat = _extract_amount(
-            raw_text, re.compile(r"VAT\s*(?:\(15%\))?\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I)
-        )
-        penalty_fee = _extract_amount(
-            raw_text, re.compile(r"Penalty\s*Fee\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I)
-        )
-        income_tax_fee = _extract_amount(
-            raw_text, re.compile(r"Income\s*Tax\s*Fee\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I)
-        )
-        interest_fee = _extract_amount(
-            raw_text, re.compile(r"Interest\s*Fee\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I)
-        )
-        stamp_duty = _extract_amount(
-            raw_text, re.compile(r"Stamp\s*Duty\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I)
-        )
-        discount_amount = _extract_amount(
-            raw_text, re.compile(r"Discount\s*Amount\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I)
-        )
-        total = _extract_amount(
-            raw_text, re.compile(r"Total\s*(?:ETB|Birr)?\s*([\d,]+\.?\d*)", re.I)
-        )
-
-        # Format names
-        formatted_sender = _title_case(sender_name) if sender_name else None
-        formatted_receiver = _title_case(receiver_name) if receiver_name else None
-        formatted_institution = _title_case(institution_name) if institution_name else None
-
-        if transaction_ref and transaction_amount:
-            logger.info("\u2705 PDF parsing successful - all required fields extracted")
-            return DashenVerifyResult(
-                success=True,
-                sender_name=formatted_sender,
-                sender_account_number=sender_account_number,
-                transaction_channel=transaction_channel,
-                service_type=service_type,
-                narrative=narrative,
-                receiver_name=formatted_receiver,
-                phone_no=phone_no,
-                institution_name=formatted_institution,
-                transaction_reference=transaction_ref,
-                transfer_reference=transfer_reference,
-                transaction_date=transaction_date,
-                transaction_amount=transaction_amount,
-                service_charge=service_charge,
-                excise_tax=excise_tax,
-                vat=vat,
-                penalty_fee=penalty_fee,
-                income_tax_fee=income_tax_fee,
-                interest_fee=interest_fee,
-                stamp_duty=stamp_duty,
-                discount_amount=discount_amount,
-                total=total,
-            )
-        else:
-            logger.warning("\u26a0\ufe0f PDF parsing failed - missing required fields")
-            return DashenVerifyResult(
-                success=False,
-                error="Could not extract required fields (Transaction Reference and Amount) from PDF.",
-            )
-
+        return _build_result(raw_fields)
     except Exception as e:
-        logger.error("\u274c Dashen PDF parsing failed: %s", str(e))
+        logger.error("❌ Dashen PDF parsing failed: %s", str(e))
         return DashenVerifyResult(success=False, error="Error parsing PDF data")

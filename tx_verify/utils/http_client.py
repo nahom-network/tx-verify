@@ -219,6 +219,7 @@ async def fetch_with_retry(
     proxies: Any = None,
     headers: dict[str, str] | None = None,
     raise_for_status: bool = True,
+    follow_redirects: bool = False,
     **request_kwargs: Any,
 ) -> httpx.Response:
     """Fetch a URL with an async httpx client, retrying on transient failures.
@@ -240,6 +241,7 @@ async def fetch_with_retry(
                 verify=verify,
                 proxies=resolved_proxies,
                 headers=headers,
+                follow_redirects=follow_redirects,
             ) as client:
                 response = await client.request(method, url, **request_kwargs)
                 if raise_for_status:
@@ -294,6 +296,7 @@ def fetch_sync_with_retry(
     proxies: Any = None,
     headers: dict[str, str] | None = None,
     raise_for_status: bool = True,
+    follow_redirects: bool = False,
     **request_kwargs: Any,
 ) -> httpx.Response:
     """Synchronous equivalent of ``fetch_with_retry``.
@@ -313,6 +316,7 @@ def fetch_sync_with_retry(
                 verify=verify,
                 proxies=resolved_proxies,
                 headers=headers,
+                follow_redirects=follow_redirects,
             ) as client:
                 response = client.request(method, url, **request_kwargs)
                 if raise_for_status:
