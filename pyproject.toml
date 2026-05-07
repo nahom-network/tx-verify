@@ -1,6 +1,6 @@
 [project]
 name = "tx-verify"
-version = "0.1.2"
+version = "1.0.0"
 description = "Transaction Verification API — Python library for verifying Ethiopian payment transactions (CBE, Telebirr, Dashen, Abyssinia, CBE Birr, M-Pesa)."
 authors = [{name = "Nahom d"}]
 license = {text = "ISC"}
@@ -129,7 +129,7 @@ testpaths = ["tests"]
 # python-semantic-release (automatic changelogs & versioning)
 # ---------------------------------------------------------------------------
 [tool.semantic_release]
-version_variables = ["tx_verify/__init__.py:__version__"]
+version_variables = ["tx_verify/__init__.py:__version__", "pyproject.toml:version"]
 branch = "main"
 changelog_file = "CHANGELOG.md"
 upload_to_pypi = false
