@@ -1,6 +1,6 @@
 """Payment Verification API - Python library for verifying Ethiopian payment transactions."""
 
-from tx_verify.services.verify_abyssinia import AbyssiniaReceipt, verify_abyssinia
+from tx_verify.services.verify_abyssinia import AbyssiniaVerifyResult, verify_abyssinia
 from tx_verify.services.verify_cbe import VerifyResult, verify_cbe
 from tx_verify.services.verify_cbe_birr import CBEBirrReceipt, verify_cbe_birr
 from tx_verify.services.verify_dashen import DashenVerifyResult, verify_dashen
@@ -30,7 +30,7 @@ __all__ = [
     "TelebirrReceipt",
     "TelebirrVerificationError",
     "DashenVerifyResult",
-    "AbyssiniaReceipt",
+    "AbyssiniaVerifyResult",
     "CBEBirrReceipt",
     "MpesaVerifyResult",
     "AppError",

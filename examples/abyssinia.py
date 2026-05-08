@@ -22,14 +22,22 @@ async def main() -> None:
         return
 
     print("✅ Bank of Abyssinia receipt verified:")
-    print(f"  Payer            : {result.payer}")
-    print(f"  Payer Account    : {result.payer_account}")
-    print(f"  Receiver         : {result.receiver}")
-    print(f"  Receiver Account : {result.receiver_account}")
-    print(f"  Amount           : {result.amount} ETB")
-    print(f"  Date             : {result.date}")
-    print(f"  Reference        : {result.reference}")
-    print(f"  Reason / Service : {result.reason}")
+    print(f"  Transaction Reference      : {result.transaction_reference}")
+    print(f"  Payer Name                 : {result.payer_name}")
+    print(f"  Payer Account              : {result.payer_account}")
+    print(f"  Receiver Name              : {result.receiver_name}")
+    print(f"  Receiver Account           : {result.receiver_account}")
+    print(f"  Transferred Amount         : {result.transferred_amount} {result.currency}")
+    print(f"  Total Amount (incl. VAT)   : {result.total_amount_including_vat}")
+    print(f"  VAT (15%)                  : {result.vat}")
+    print(f"  Service Charge             : {result.service_charge}")
+    print(f"  Transaction Date           : {result.transaction_date}")
+    print(f"  Transaction Type           : {result.transaction_type}")
+    print(f"  Narrative                  : {result.narrative}")
+    print(f"  Amount in Words            : {result.transferred_amount_in_words}")
+    print(f"  Address                    : {result.address}")
+    print(f"  Phone                      : {result.phone}")
+    print(f"  META                       : {result.meta}")
 
 
 if __name__ == "__main__":
