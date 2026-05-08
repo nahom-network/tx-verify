@@ -58,9 +58,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/tx-verify"
-Repository = "https://github.com/YOUR_USERNAME/tx-verify"
-Issues = "https://github.com/YOUR_USERNAME/tx-verify/issues"
+Homepage = "https://github.com/nahom-network/tx-verify"
+Repository = "https://github.com/nahom-network/tx-verify"
+Issues = "https://github.com/nahom-network/tx-verify/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -72,9 +72,6 @@ packages = ["tx_verify"]
 [tool.hatch.version]
 path = "tx_verify/__init__.py"
 
-# ---------------------------------------------------------------------------
-# Ruff (linter & formatter)
-# ---------------------------------------------------------------------------
 [tool.ruff]
 target-version = "py310"
 line-length = 100
@@ -100,16 +97,10 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 
-# ---------------------------------------------------------------------------
-# Black (code formatter — for compatibility; ruff format is primary)
-# ---------------------------------------------------------------------------
 [tool.black]
 line-length = 100
 target-version = ["py310", "py311", "py312", "py313"]
 
-# ---------------------------------------------------------------------------
-# MyPy
-# ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
@@ -118,16 +109,10 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 ignore_missing_imports = false
 
-# ---------------------------------------------------------------------------
-# pytest
-# ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
-# ---------------------------------------------------------------------------
-# python-semantic-release (automatic changelogs & versioning)
-# ---------------------------------------------------------------------------
 [tool.semantic_release]
 version_variables = ["tx_verify/__init__.py:__version__", "pyproject.toml:version"]
 branch = "main"
