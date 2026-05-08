@@ -15,7 +15,7 @@ from tx_verify.services.verify_universal import verify_universal
 from tx_verify.utils.error_handler import AppError, ErrorType
 from tx_verify.utils.logger import logger
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 __all__ = [
     "verify_cbe",
