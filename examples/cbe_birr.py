@@ -18,26 +18,22 @@ async def main() -> None:
 
     result = await verify_cbe_birr(receipt_number, phone_number)
 
-    # CBEBirrError is a dataclass with .success and .error
-    if hasattr(result, "success") and not result.success:
+    if not result.success:
         print(f"❌ Verification failed: {result.error}")
         return
 
-    receipt = result
     print("✅ CBE Birr receipt verified:")
-    print(f"  Customer Name    : {receipt.customer_name}")
-    print(f"  Receiver Name    : {receipt.receiver_name}")
-    print(f"  Order ID         : {receipt.order_id}")
-    print(f"  Reference        : {receipt.reference}")
-    print(f"  Receipt Number   : {receipt.receipt_number}")
-    print(f"  Transaction Date : {receipt.transaction_date}")
-    print(f"  Amount           : {receipt.amount}")
-    print(f"  Paid Amount      : {receipt.paid_amount}")
-    print(f"  Service Charge   : {receipt.service_charge}")
-    print(f"  VAT              : {receipt.vat}")
-    print(f"  Total Paid       : {receipt.total_paid_amount}")
-    print(f"  Payment Reason   : {receipt.payment_reason}")
-    print(f"  Payment Channel  : {receipt.payment_channel}")
+    print(f"  Customer Name    : {result.payer_name}")
+    print(f"  Receiver Name    : {result.receiver_name}")
+    print(f"  Order ID         : {result.transaction_reference}")
+    print(f"  Receipt Number   : {result.receipt_number}")
+    print(f"  Transaction Date : {result.transaction_date}")
+    print(f"  Amount           : {result.amount}")
+    print(f"  Service Charge   : {result.service_charge}")
+    print(f"  VAT              : {result.vat}")
+    print(f"  Total Paid       : {result.total_amount}")
+    print(f"  Payment Reason   : {result.narrative}")
+    print(f"  Payment Channel  : {result.payment_channel}")
 
 
 if __name__ == "__main__":

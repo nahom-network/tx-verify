@@ -13,24 +13,24 @@ async def main() -> None:
     # Replace with a real Telebirr reference number
     reference = "CHC15IZ2VZ"
 
-    receipt = await verify_telebirr(reference)
+    result = await verify_telebirr(reference)
 
-    if receipt is None:
+    if not result.success:
         print("❌ Could not verify the Telebirr transaction.")
         return
 
     print("✅ Telebirr receipt found:")
-    print(f"  Payer Name        : {receipt.payer_name}")
-    print(f"  Payer Telebirr No : {receipt.payer_telebirr_no}")
-    print(f"  Credited Party    : {receipt.credited_party_name}")
-    print(f"  Account No        : {receipt.credited_party_account_no}")
-    print(f"  Settled Amount    : {receipt.settled_amount}")
-    print(f"  Service Fee       : {receipt.service_fee}")
-    print(f"  Total Paid        : {receipt.total_paid_amount}")
-    print(f"  Receipt No        : {receipt.receipt_no}")
-    print(f"  Payment Date      : {receipt.payment_date}")
-    print(f"  Transaction Status: {receipt.transaction_status}")
-    print(f"  META              : {receipt.meta}")
+    print(f"  Payer Name        : {result.payer_name}")
+    print(f"  Payer Account     : {result.payer_account}")
+    print(f"  Receiver Name     : {result.receiver_name}")
+    print(f"  Receiver Account  : {result.receiver_account}")
+    print(f"  Amount            : {result.amount}")
+    print(f"  Service Charge    : {result.service_charge}")
+    print(f"  Total Paid        : {result.total_amount}")
+    print(f"  Receipt No        : {result.receipt_number}")
+    print(f"  Payment Date      : {result.transaction_date}")
+    print(f"  Transaction Status: {result.transaction_status}")
+    print(f"  META              : {result.meta}")
 
 
 if __name__ == "__main__":

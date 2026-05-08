@@ -3,35 +3,15 @@
 Translated from src/services/verifyTelebirr.ts
 """
 
-from dataclasses import dataclass, field
+from contextlib import suppress
+from datetime import datetime
 from typing import Any
 
 from bs4 import BeautifulSoup
 
+from tx_verify.models import TransactionResult
 from tx_verify.utils.http_client import get_async_client
 from tx_verify.utils.logger import logger
-
-
-@dataclass
-class TelebirrReceipt:
-    """Telebirr receipt data."""
-
-    # Core fields — present on every receipt and needed for verification
-    payer_name: str = ""
-    payer_telebirr_no: str = ""
-    credited_party_name: str = ""
-    credited_party_account_no: str = ""
-    transaction_status: str = ""
-    receipt_no: str = ""
-    payment_date: str = ""
-    settled_amount: str = ""
-    service_fee: str = ""
-    service_fee_vat: str = ""
-    total_paid_amount: str = ""
-    bank_name: str = ""
-
-    # Variable / receipt-type-specific fields that don't appear on every receipt
-    meta: dict = field(default_factory=dict)
 
 
 class TelebirrVerificationError(Exception):
@@ -81,7 +61,7 @@ _LABELS: dict[str, list[str]] = {
     "customer_note": ["የደንበኛ መልዕክት/Customer Note"],
 }
 
-# Fields that belong on the TelebirrReceipt dataclass directly (core fields).
+# Fields that belong on the TransactionResult directly (core fields).
 _CORE_FIELDS: set[str] = {
     "payer_name",
     "payer_telebirr_no",
@@ -106,6 +86,17 @@ _VARIABLE_FIELDS: set[str] = {
     "airtime_purchased_for",
     "bank_account_number",
     "vat_15_percent",
+    "stamp_duty",
+    "discount_amount",
+    "total_amount_in_word",
+    "payment_mode",
+    "payment_reason",
+    "payment_channel",
+    "customer_note",
+    "payer_account_type",
+    "payer_tin_no",
+    "payer_vat_reg_no",
+    "payer_vat_reg_date",
 }
 
 
@@ -119,7 +110,35 @@ def _match_label(line: str) -> str | None:
     return None
 
 
-def _scrape_telebirr_receipt(html: str) -> TelebirrReceipt:
+def _parse_amount(value: str) -> float | None:
+    """Parse a numeric amount string like '1,000.00' or '100 ETB'."""
+    cleaned = value.replace(",", "").replace("ETB", "").strip()
+    with suppress(ValueError):
+        return float(cleaned)
+    return None
+
+
+def _parse_date(value: str) -> datetime | None:
+    """Best-effort parse of Telebirr payment date strings."""
+    value = value.strip()
+    formats = (
+        "%d/%m/%Y",
+        "%m/%d/%Y",
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %I:%M:%S %p",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %I:%M:%S %p",
+        "%Y-%m-%d %H:%M:%S",
+    )
+    for fmt in formats:
+        with suppress(ValueError):
+            return datetime.strptime(value, fmt)
+    return None
+
+
+def _scrape_telebirr_receipt(html: str) -> TransactionResult:
     """Scrape Telebirr receipt data from HTML using a flat line-scanning approach.
 
     The Ethio Telecom receipt HTML contains nested <table> structures with
@@ -180,56 +199,55 @@ def _scrape_telebirr_receipt(html: str) -> TelebirrReceipt:
         bank_name = raw.get("credited_party_name", "")
 
     # ------------------------------------------------------------------
-    # Build core attributes and meta dict
+    # Build meta dict for optional/variable fields
     # ------------------------------------------------------------------
     meta: dict[str, str] = {}
     for key, val in raw.items():
         if key in _VARIABLE_FIELDS and val:
             meta[key] = val
+    if bank_name:
+        meta["bank_name"] = bank_name
 
-    return TelebirrReceipt(
-        payer_name=raw.get("payer_name", ""),
-        payer_telebirr_no=raw.get("payer_telebirr_no", ""),
-        credited_party_name=raw.get("credited_party_name", ""),
-        credited_party_account_no=raw.get("credited_party_account_no", ""),
-        transaction_status=raw.get("transaction_status", ""),
-        receipt_no=raw.get("receipt_no", ""),
-        payment_date=raw.get("payment_date", ""),
-        settled_amount=raw.get("settled_amount", ""),
-        service_fee=raw.get("service_fee", ""),
-        service_fee_vat=raw.get("service_fee_vat", ""),
-        total_paid_amount=raw.get("total_paid_amount", ""),
-        bank_name=bank_name,
+    # ------------------------------------------------------------------
+    # Build TransactionResult
+    # ------------------------------------------------------------------
+    return TransactionResult(
+        success=bool(
+            raw.get("receipt_no") and raw.get("payer_name") and raw.get("transaction_status")
+        ),
+        provider="telebirr",
+        payer_name=raw.get("payer_name") or None,
+        payer_account=raw.get("payer_telebirr_no") or None,
+        receiver_name=raw.get("credited_party_name") or None,
+        receiver_account=raw.get("credited_party_account_no") or None,
+        transaction_status=raw.get("transaction_status") or None,
+        receipt_number=raw.get("receipt_no") or None,
+        transaction_date=_parse_date(raw["payment_date"]) if raw.get("payment_date") else None,
+        amount=_parse_amount(raw["settled_amount"]) if raw.get("settled_amount") else None,
+        service_charge=_parse_amount(raw["service_fee"]) if raw.get("service_fee") else None,
+        vat=_parse_amount(raw["service_fee_vat"]) if raw.get("service_fee_vat") else None,
+        total_amount=_parse_amount(raw["total_paid_amount"])
+        if raw.get("total_paid_amount")
+        else None,
         meta=meta,
+        error=None,
     )
 
 
-def _parse_telebirr_json(json_data: Any) -> TelebirrReceipt | None:
+def _parse_telebirr_json(json_data: Any) -> TransactionResult:
     """Parse receipt from a proxy JSON response."""
     try:
         if not json_data or not json_data.get("success") or not json_data.get("data"):
             logger.warning("Invalid JSON structure from proxy endpoint")
-            return None
+            return TransactionResult(
+                success=False,
+                provider="telebirr",
+                error="Invalid JSON structure from proxy endpoint",
+            )
 
         d = json_data["data"]
 
-        # Core fields
-        receipt = TelebirrReceipt(
-            payer_name=d.get("payerName", ""),
-            payer_telebirr_no=d.get("payerTelebirrNo", ""),
-            credited_party_name=d.get("creditedPartyName", ""),
-            credited_party_account_no=d.get("creditedPartyAccountNo", ""),
-            transaction_status=d.get("transactionStatus", ""),
-            receipt_no=d.get("receiptNo", ""),
-            payment_date=d.get("paymentDate", ""),
-            settled_amount=d.get("settledAmount", ""),
-            service_fee=d.get("serviceFee", ""),
-            service_fee_vat=d.get("serviceFeeVAT", ""),
-            total_paid_amount=d.get("totalPaidAmount", ""),
-            bank_name=d.get("bankName", ""),
-        )
-
-        # Any leftover keys that aren't core go into meta
+        meta: dict[str, Any] = {}
         core_json_keys = {
             "payerName",
             "payerTelebirrNo",
@@ -249,21 +267,39 @@ def _parse_telebirr_json(json_data: Any) -> TelebirrReceipt | None:
         }
         for key, val in d.items():
             if key not in core_json_keys and val:
-                receipt.meta[key] = str(val)
+                meta[key] = str(val)
 
-        return receipt
+        if d.get("bankName"):
+            meta["bank_name"] = str(d["bankName"])
+
+        return TransactionResult(
+            success=True,
+            provider="telebirr",
+            payer_name=d.get("payerName") or None,
+            payer_account=d.get("payerTelebirrNo") or None,
+            receiver_name=d.get("creditedPartyName") or None,
+            receiver_account=d.get("creditedPartyAccountNo") or None,
+            transaction_status=d.get("transactionStatus") or None,
+            receipt_number=d.get("receiptNo") or None,
+            transaction_date=_parse_date(d["paymentDate"]) if d.get("paymentDate") else None,
+            amount=_parse_amount(d["settledAmount"]) if d.get("settledAmount") else None,
+            service_charge=_parse_amount(d["serviceFee"]) if d.get("serviceFee") else None,
+            vat=_parse_amount(d["serviceFeeVAT"]) if d.get("serviceFeeVAT") else None,
+            total_amount=_parse_amount(d["totalPaidAmount"]) if d.get("totalPaidAmount") else None,
+            meta=meta,
+        )
     except Exception as e:
         logger.error("Error parsing JSON from proxy endpoint: %s", e)
-        return None
-
-
-def _is_valid_receipt(receipt: TelebirrReceipt) -> bool:
-    return bool(receipt.receipt_no and receipt.payer_name and receipt.transaction_status)
+        return TransactionResult(
+            success=False,
+            provider="telebirr",
+            error=f"Error parsing JSON from proxy endpoint: {e}",
+        )
 
 
 async def _fetch_from_primary_source(
     reference: str, base_url: str, *, proxies: str | dict[str, str] | None = None
-) -> TelebirrReceipt | None:
+) -> TransactionResult:
     url = f"{base_url}{reference}"
     try:
         logger.info("Attempting to fetch Telebirr receipt from primary source: %s", url)
@@ -279,12 +315,16 @@ async def _fetch_from_primary_source(
         return extracted
     except Exception as e:
         logger.error("Error fetching Telebirr receipt from primary source %s: %s", url, e)
-        return None
+        return TransactionResult(
+            success=False,
+            provider="telebirr",
+            error=f"Error fetching Telebirr receipt: {e}",
+        )
 
 
 async def verify_telebirr(
     reference: str, *, proxies: str | dict[str, str] | None = None
-) -> TelebirrReceipt | None:
+) -> TransactionResult:
     """Verify a Telebirr transaction.
 
     Args:
@@ -296,10 +336,14 @@ async def verify_telebirr(
     primary_url = "https://transactioninfo.ethiotelecom.et/receipt/"
 
     primary_result = await _fetch_from_primary_source(reference, primary_url, proxies=proxies)
-    if primary_result and _is_valid_receipt(primary_result):
+    if primary_result.success:
         return primary_result
     logger.error(
         "Primary verification failed for reference: %s",
         reference,
     )
-    return None
+    return TransactionResult(
+        success=False,
+        provider="telebirr",
+        error="Receipt not found or could not be processed.",
+    )

@@ -5,48 +5,14 @@ Translated from src/services/verifyDashen.ts
 
 import io
 import ssl
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from pypdf import PdfReader
 
+from tx_verify.models import TransactionResult
 from tx_verify.utils.http_client import fetch_with_retry
 from tx_verify.utils.logger import logger
-
-
-@dataclass
-class DashenVerifyResult:
-    """Dashen Bank verification result."""
-
-    success: bool
-    sender_name: str | None = None
-    sender_account_number: str | None = None
-    transaction_channel: str | None = None
-    service_type: str | None = None
-    narrative: str | None = None
-    receiver_name: str | None = None
-    receiver_account_number: str | None = None
-    institution_name: str | None = None
-    transaction_reference: str | None = None
-    transfer_reference: str | None = None
-    transaction_date: datetime | None = None
-    transaction_amount: float | None = None
-    service_charge: float | None = None
-    excise_tax: float | None = None
-    drrf_fee: float | None = None
-    vat: float | None = None
-    penalty_fee: float | None = None
-    income_tax_fee: float | None = None
-    tax: float | None = None
-    interest_fee: float | None = None
-    stamp_duty: float | None = None
-    discount_amount: float | None = None
-    total: float | None = None
-    amount_in_words: str | None = None
-    meta: dict[str, Any] = field(default_factory=dict)
-    error: str | None = None
-
 
 # Labels that appear in the "Transaction Details" section as line pairs:
 # Label line followed by an "ETB <amount>" line.
@@ -230,8 +196,8 @@ def _extract_fields(lines: list[str]) -> dict[str, str]:
     return fields
 
 
-def _build_result(raw_fields: dict[str, str]) -> DashenVerifyResult:
-    """Map raw extracted fields into a typed DashenVerifyResult."""
+def _build_result(raw_fields: dict[str, str]) -> TransactionResult:
+    """Map raw extracted fields into a typed TransactionResult."""
     meta: dict[str, Any] = {}
     typed: dict[str, Any] = {}
 
@@ -277,40 +243,47 @@ def _build_result(raw_fields: dict[str, str]) -> DashenVerifyResult:
         if isinstance(typed.get(name_key), str):
             typed[name_key] = _title_case(typed[name_key])
 
-    return DashenVerifyResult(
+    # Move provider-specific fields to meta
+    for meta_key in (
+        "institution_name",
+        "transfer_reference",
+        "excise_tax",
+        "drrf_fee",
+        "penalty_fee",
+        "income_tax_fee",
+        "tax",
+        "interest_fee",
+        "stamp_duty",
+        "discount_amount",
+    ):
+        if meta_key in typed:
+            meta[meta_key] = typed.pop(meta_key)
+
+    return TransactionResult(
         success=success,
-        sender_name=typed.get("sender_name"),
-        sender_account_number=typed.get("sender_account_number"),
-        transaction_channel=typed.get("transaction_channel"),
-        service_type=typed.get("service_type"),
+        provider="dashen",
+        error=error,
+        payer_name=typed.get("sender_name"),
+        payer_account=typed.get("sender_account_number"),
+        payment_channel=typed.get("transaction_channel"),
+        transaction_type=typed.get("service_type"),
         narrative=typed.get("narrative"),
         receiver_name=typed.get("receiver_name"),
-        receiver_account_number=typed.get("receiver_account_number"),
-        institution_name=typed.get("institution_name"),
+        receiver_account=typed.get("receiver_account_number"),
         transaction_reference=tx_ref,
-        transfer_reference=typed.get("transfer_reference"),
         transaction_date=typed.get("transaction_date"),
-        transaction_amount=typed.get("transaction_amount"),
+        amount=typed.get("transaction_amount"),
         service_charge=typed.get("service_charge"),
-        excise_tax=typed.get("excise_tax"),
-        drrf_fee=typed.get("drrf_fee"),
         vat=typed.get("vat"),
-        penalty_fee=typed.get("penalty_fee"),
-        income_tax_fee=typed.get("income_tax_fee"),
-        tax=typed.get("tax"),
-        interest_fee=typed.get("interest_fee"),
-        stamp_duty=typed.get("stamp_duty"),
-        discount_amount=typed.get("discount_amount"),
-        total=typed.get("total"),
+        total_amount=typed.get("total"),
         amount_in_words=typed.get("amount_in_words"),
         meta=meta,
-        error=error,
     )
 
 
 async def verify_dashen(
     transaction_reference: str, *, proxies: str | dict[str, str] | None = None
-) -> DashenVerifyResult:
+) -> TransactionResult:
     """Verify a Dashen Bank transaction with retry logic."""
     url = f"https://receipt.dashensuperapp.com/receipt/{transaction_reference}"
     max_retries = 5
@@ -335,13 +308,14 @@ async def verify_dashen(
         return _parse_dashen_receipt(response.content)
     except Exception as e:
         logger.error("❌ All retry attempts failed for Dashen receipt: %s", str(e))
-        return DashenVerifyResult(
+        return TransactionResult(
             success=False,
+            provider="dashen",
             error=f"Failed to fetch receipt after {max_retries} attempts: {e}",
         )
 
 
-def _parse_dashen_receipt(pdf_bytes: bytes) -> DashenVerifyResult:
+def _parse_dashen_receipt(pdf_bytes: bytes) -> TransactionResult:
     """Extract fields from a Dashen Bank PDF receipt."""
     try:
         logger.info("📊 PDF buffer size: %d bytes", len(pdf_bytes))
@@ -356,4 +330,8 @@ def _parse_dashen_receipt(pdf_bytes: bytes) -> DashenVerifyResult:
         return _build_result(raw_fields)
     except Exception as e:
         logger.error("❌ Dashen PDF parsing failed: %s", str(e))
-        return DashenVerifyResult(success=False, error="Error parsing PDF data")
+        return TransactionResult(
+            success=False,
+            provider="dashen",
+            error="Error parsing PDF data",
+        )

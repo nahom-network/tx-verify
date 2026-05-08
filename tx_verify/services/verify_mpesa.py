@@ -4,39 +4,14 @@ import base64
 import io
 import re
 from contextlib import suppress
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from pypdf import PdfReader
 
+from tx_verify.models import TransactionResult
 from tx_verify.utils.http_client import get_async_client
 from tx_verify.utils.logger import logger
-
-
-@dataclass
-class MpesaVerifyResult:
-    """M-Pesa verification result.
-
-    Fields present on every receipt are typed attributes.
-    Fields that vary by receipt type go into ``meta``.
-    """
-
-    success: bool
-    transaction_id: str | None = None
-    receipt_no: str | None = None
-    payment_date: datetime | None = None
-    amount: float | None = None
-    service_fee: float | None = None
-    vat: float | None = None
-    payer_name: str | None = None
-    payer_account: str | None = None
-    payment_method: str | None = None
-    transaction_type: str | None = None
-    payment_channel: str | None = None
-    amount_in_words: str | None = None
-    meta: dict = field(default_factory=dict)
-    error: str | None = None
 
 
 def _title_case(s: str) -> str:
@@ -97,7 +72,7 @@ _LABEL_MAP: dict[str, tuple[str, str]] = {
     "RECEIVER BUSINESS NAME": ("receiver_business_name", "meta"),
     "RECEIVER BUSINESS NUMBER": ("receiver_business_number", "meta"),
     "BANK NAME": ("bank_name", "meta"),
-    "TRANSACTION ID": ("transaction_id", "data"),
+    "TRANSACTION ID": ("transaction_reference", "data"),
     "SERVICE FEE": ("service_fee", "data"),
     "DISCOUNT": ("discount", "meta"),
     "+ 15% VAT": ("vat", "data"),
@@ -128,14 +103,14 @@ def _parse_receipt_lines(lines: list[str]) -> tuple[dict[str, Any], dict[str, An
         val_line = _clean_amharic(lines[receipt_header_idx + 1]).strip()
         parts = re.split(r"\s{2,}", val_line)
         if len(parts) >= 3:
-            data["receipt_no"] = parts[0].strip()
+            data["receipt_number"] = parts[0].strip()
             date_time_str = " ".join(parts[1:-1]).strip()
             amount_str = parts[-1].strip()
             data["amount"] = float(amount_str)
             m = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", date_time_str)
             if m:
                 with suppress(ValueError):
-                    data["payment_date"] = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+                    data["transaction_date"] = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
 
     # --- Regular label-value pairs ---
     for i, line in enumerate(lines):
@@ -202,7 +177,7 @@ async def _fetch_from_url(
 
 async def verify_mpesa(
     transaction_id: str, *, proxies: str | dict[str, str] | None = None
-) -> MpesaVerifyResult:
+) -> TransactionResult:
     """Verify an M-Pesa transaction."""
     primary_url = (
         f"https://m-pesabusiness.safaricom.et/api/receipt/getReceipt?trxNo={transaction_id}"
@@ -211,8 +186,9 @@ async def verify_mpesa(
         data = await _fetch_from_url(primary_url, "primary API", proxies=proxies)
     except Exception as e:
         logger.warning("⚠️ Primary M-Pesa fetch failed: %s", e)
-        return MpesaVerifyResult(
+        return TransactionResult(
             success=False,
+            provider="mpesa",
             error="Failed to fetch M-Pesa receipt.",
         )
 
@@ -230,31 +206,60 @@ async def verify_mpesa(
             return _parse_mpesa_receipt(pdf_bytes)
         except Exception as e:
             logger.error("❌ Failed to convert/parse base64 PDF: %s", e)
-            return MpesaVerifyResult(success=False, error=f"Failed to process PDF data: {e}")
+            return TransactionResult(
+                success=False,
+                provider="mpesa",
+                error=f"Failed to process PDF data: {e}",
+            )
     else:
         logger.warning("⚠️ M-Pesa returned unsuccessful code or missing data")
-        return MpesaVerifyResult(
+        return TransactionResult(
             success=False,
+            provider="mpesa",
             error=f"API Error: {data.get('responseDescription', 'Unknown error')}",
         )
 
 
-def _parse_mpesa_receipt(pdf_bytes: bytes) -> MpesaVerifyResult:
+def _parse_mpesa_receipt(pdf_bytes: bytes) -> TransactionResult:
     """Extract fields from an M-Pesa PDF receipt."""
     try:
         logger.info("📄 Parsing M-Pesa receipt text")
         lines = _extract_layout_lines(pdf_bytes)
         data, meta = _parse_receipt_lines(lines)
 
-        if not data.get("transaction_id"):
+        if not data.get("transaction_reference"):
             logger.error("❌ Could not extract transaction_id from PDF")
-            return MpesaVerifyResult(
-                success=False, error="Could not parse required fields from PDF receipt."
+            return TransactionResult(
+                success=False,
+                provider="mpesa",
+                error="Could not parse required fields from PDF receipt.",
             )
 
-        logger.info("✅ Parsed M-Pesa receipt for transaction %s", data.get("transaction_id"))
-        return MpesaVerifyResult(success=True, meta=meta, **data)
+        logger.info(
+            "✅ Parsed M-Pesa receipt for transaction %s", data.get("transaction_reference")
+        )
+        return TransactionResult(
+            success=True,
+            provider="mpesa",
+            transaction_reference=data.get("transaction_reference"),
+            receipt_number=data.get("receipt_number"),
+            transaction_date=data.get("transaction_date"),
+            amount=data.get("amount"),
+            service_charge=data.get("service_fee"),
+            vat=data.get("vat"),
+            payer_name=data.get("payer_name"),
+            payer_account=data.get("payer_account"),
+            payment_method=data.get("payment_method"),
+            transaction_type=data.get("transaction_type"),
+            payment_channel=data.get("payment_channel"),
+            amount_in_words=data.get("amount_in_words"),
+            meta=meta,
+        )
 
     except Exception as e:
         logger.error("❌ Error parsing PDF buffer: %s", e)
-        return MpesaVerifyResult(success=False, error=f"Failed to parse PDF content: {e}")
+        return TransactionResult(
+            success=False,
+            provider="mpesa",
+            error=f"Failed to parse PDF content: {e}",
+        )

@@ -5,50 +5,47 @@ Translated from src/services/verifyCBEBirr.ts
 
 import io
 import re
-from dataclasses import dataclass, field
+from contextlib import suppress
 from datetime import datetime
 
 from pypdf import PdfReader
 
+from tx_verify.models import TransactionResult
 from tx_verify.utils.http_client import get_async_client
 from tx_verify.utils.logger import logger
 
 
-@dataclass
-class CBEBirrReceipt:
-    """CBE Birr receipt data.
-
-    Core fields that appear consistently on every receipt.
-    Variable / optional fields are collected in ``meta``.
-    """
-
-    customer_name: str = ""
-    debit_account: str = ""
-    credit_account: str = ""
-    receiver_name: str = ""
-    order_id: str = ""
-    transaction_status: str = ""
-    receipt_number: str = ""
-    transaction_date: str = ""
-    amount: str = ""
-    paid_amount: str = ""
-    service_charge: str = ""
-    vat: str = ""
-    total_paid_amount: str = ""
-    payment_reason: str = ""
-    payment_channel: str = ""
-    meta: dict = field(default_factory=dict)
+def _parse_amount(value: str) -> float | None:
+    """Parse a numeric amount string like '1,000.00' or '0'."""
+    cleaned = value.replace(",", "").replace("ETB", "").strip()
+    with suppress(ValueError):
+        return float(cleaned)
+    return None
 
 
-@dataclass
-class CBEBirrError:
-    success: bool = False
-    error: str = ""
+def _parse_date(value: str) -> datetime | None:
+    """Best-effort parse of CBE Birr transaction date strings."""
+    value = value.strip()
+    formats = (
+        "%d/%m/%Y",
+        "%m/%d/%Y",
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %I:%M:%S %p",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %I:%M:%S %p",
+        "%Y-%m-%d %H:%M:%S",
+    )
+    for fmt in formats:
+        with suppress(ValueError):
+            return datetime.strptime(value, fmt)
+    return None
 
 
 async def verify_cbe_birr(
     receipt_number: str, phone_number: str, *, proxies: str | dict[str, str] | None = None
-) -> CBEBirrReceipt | CBEBirrError:
+) -> TransactionResult:
     """Verify a CBE Birr transaction by fetching and parsing its PDF receipt."""
     try:
         logger.info(
@@ -73,8 +70,10 @@ async def verify_cbe_birr(
 
         if response.status_code != 200:
             logger.error("[CBEBirr] Failed to fetch PDF: HTTP %s", response.status_code)
-            return CBEBirrError(
-                success=False, error=f"Failed to fetch receipt: HTTP {response.status_code}"
+            return TransactionResult(
+                success=False,
+                provider="cbe_birr",
+                error=f"Failed to fetch receipt: HTTP {response.status_code}",
             )
 
         # Parse PDF
@@ -86,22 +85,27 @@ async def verify_cbe_birr(
         logger.info("[CBEBirr] PDF text extracted (%d characters)", len(pdf_text))
 
         receipt = _parse_cbe_birr_receipt(pdf_text)
-        if not receipt:
+        if not receipt.success:
             logger.error("[CBEBirr] Failed to parse receipt data from PDF")
-            return CBEBirrError(success=False, error="Failed to parse receipt data from PDF")
+            return TransactionResult(
+                success=False,
+                provider="cbe_birr",
+                error="Failed to parse receipt data from PDF",
+            )
 
         logger.info("[CBEBirr] Successfully parsed receipt data")
         return receipt
 
     except Exception as e:
         logger.error("[CBEBirr] Error during verification: %s", e)
-        return CBEBirrError(
+        return TransactionResult(
             success=False,
+            provider="cbe_birr",
             error=str(e) if str(e) else "Unknown error occurred",
         )
 
 
-def _parse_cbe_birr_receipt(pdf_text: str) -> CBEBirrReceipt | None:
+def _parse_cbe_birr_receipt(pdf_text: str) -> TransactionResult:
     """Parse CBE Birr receipt fields from extracted PDF text.
 
     Uses a robust line-by-line scanner that works with the sparse
@@ -281,7 +285,11 @@ def _parse_cbe_birr_receipt(pdf_text: str) -> CBEBirrReceipt | None:
         # ---- validate we got the essentials ----------------------------------
         if not customer_name and not receipt_number and not amount:
             logger.warning("[CBEBirr] No essential fields found in PDF")
-            return None
+            return TransactionResult(
+                success=False,
+                provider="cbe_birr",
+                error="No essential fields found in PDF",
+            )
 
         # ---- assemble meta dict for optional/variable fields -----------------
         meta: dict[str, str] = {}
@@ -293,26 +301,33 @@ def _parse_cbe_birr_receipt(pdf_text: str) -> CBEBirrReceipt | None:
             meta["branch"] = branch
         if tip and tip != "0.00":
             meta["tip"] = tip
+        if paid_amount:
+            meta["paid_amount"] = paid_amount
 
-        return CBEBirrReceipt(
-            customer_name=customer_name,
-            debit_account=debit_account,
-            credit_account=credit_account,
-            receiver_name=receiver_name,
-            order_id=order_id,
-            transaction_status=transaction_status,
-            receipt_number=receipt_number,
-            transaction_date=transaction_date,
-            amount=amount,
-            paid_amount=paid_amount,
-            service_charge=service_charge,
-            vat=vat,
-            total_paid_amount=total_paid_amount,
-            payment_reason=payment_reason,
-            payment_channel=payment_channel,
+        return TransactionResult(
+            success=True,
+            provider="cbe_birr",
+            payer_name=customer_name or None,
+            payer_account=debit_account or None,
+            receiver_account=credit_account or None,
+            receiver_name=receiver_name or None,
+            transaction_reference=order_id or None,
+            transaction_status=transaction_status or None,
+            receipt_number=receipt_number or None,
+            transaction_date=_parse_date(transaction_date) if transaction_date else None,
+            amount=_parse_amount(amount) if amount else None,
+            service_charge=_parse_amount(service_charge) if service_charge else None,
+            vat=_parse_amount(vat) if vat else None,
+            total_amount=_parse_amount(total_paid_amount) if total_paid_amount else None,
+            narrative=payment_reason or None,
+            payment_channel=payment_channel or None,
             meta=meta,
         )
 
     except Exception as e:
         logger.error("[CBEBirr] Error parsing PDF text: %s", e)
-        return None
+        return TransactionResult(
+            success=False,
+            provider="cbe_birr",
+            error="Error parsing PDF text",
+        )

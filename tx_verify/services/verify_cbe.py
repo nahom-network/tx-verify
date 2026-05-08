@@ -6,29 +6,13 @@ Translated from src/services/verifyCBE.ts
 import io
 import re
 import ssl
-from dataclasses import dataclass
 from datetime import datetime
 
 from pypdf import PdfReader
 
+from tx_verify.models import TransactionResult
 from tx_verify.utils.http_client import get_async_client
 from tx_verify.utils.logger import logger
-
-
-@dataclass
-class VerifyResult:
-    """Standard verification result used across multiple services."""
-
-    success: bool
-    payer: str | None = None
-    payer_account: str | None = None
-    receiver: str | None = None
-    receiver_account: str | None = None
-    amount: float | None = None
-    date: datetime | None = None
-    reference: str | None = None
-    reason: str | None = None
-    error: str | None = None
 
 
 def _title_case(s: str) -> str:
@@ -45,7 +29,7 @@ def _make_ssl_context() -> ssl.SSLContext:
 
 async def verify_cbe(
     reference: str, account_suffix: str = "", *, proxies: str | dict[str, str] | None = None
-) -> VerifyResult:
+) -> TransactionResult:
     """Verify a CBE transaction by fetching and parsing its PDF receipt.
 
     First attempts a direct HTTPS fetch; on failure would fall back to
@@ -55,7 +39,7 @@ async def verify_cbe(
     url = f"https://apps.cbe.com.et:100/?id={full_id}"
 
     try:
-        logger.info("\U0001f50e Attempting direct fetch: %s", url)
+        logger.info("🔎 Attempting direct fetch: %s", url)
         async with get_async_client(
             verify=_make_ssl_context(), timeout=30.0, proxies=proxies
         ) as client:
@@ -68,20 +52,21 @@ async def verify_cbe(
             )
             response.raise_for_status()
 
-        logger.info("\u2705 Direct fetch success, parsing PDF")
+        logger.info("✅ Direct fetch success, parsing PDF")
         return _parse_cbe_receipt(response.content)
 
     except Exception as direct_err:
-        logger.warning("\u26a0\ufe0f Direct fetch failed: %s", str(direct_err))
+        logger.warning("⚠️ Direct fetch failed: %s", str(direct_err))
         # The TS version falls back to Puppeteer here.
         # We do not bundle a headless browser; return the error.
-        return VerifyResult(
+        return TransactionResult(
             success=False,
+            provider="cbe",
             error=f"Direct fetch failed: {direct_err}",
         )
 
 
-def _parse_cbe_receipt(pdf_bytes: bytes) -> VerifyResult:
+def _parse_cbe_receipt(pdf_bytes: bytes) -> TransactionResult:
     """Extract transaction fields from a CBE PDF receipt."""
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -139,26 +124,32 @@ def _parse_cbe_receipt(pdf_bytes: bytes) -> VerifyResult:
             and date
             and reference_val
         ):
-            return VerifyResult(
+            return TransactionResult(
                 success=True,
-                payer=payer_name,
+                provider="cbe",
+                payer_name=payer_name,
                 payer_account=payer_account,
-                receiver=receiver_name,
+                receiver_name=receiver_name,
                 receiver_account=receiver_account,
                 amount=amount,
-                date=date,
-                reference=reference_val,
-                reason=reason,
+                transaction_date=date,
+                transaction_reference=reference_val,
+                narrative=reason,
             )
         else:
-            return VerifyResult(
+            return TransactionResult(
                 success=False,
+                provider="cbe",
                 error="Could not extract all required fields from PDF.",
             )
 
     except Exception as e:
-        logger.error("\u274c PDF parsing failed: %s", str(e))
-        return VerifyResult(success=False, error="Error parsing PDF data")
+        logger.error("❌ PDF parsing failed: %s", str(e))
+        return TransactionResult(
+            success=False,
+            provider="cbe",
+            error="Error parsing PDF data",
+        )
 
 
 def _parse_date(raw: str) -> datetime | None:

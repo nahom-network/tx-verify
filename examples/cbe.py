@@ -22,14 +22,14 @@ async def main() -> None:
         return
 
     print("✅ CBE receipt verified:")
-    print(f"  Payer            : {result.payer}")
+    print(f"  Payer            : {result.payer_name}")
     print(f"  Payer Account    : {result.payer_account}")
-    print(f"  Receiver         : {result.receiver}")
+    print(f"  Receiver         : {result.receiver_name}")
     print(f"  Receiver Account : {result.receiver_account}")
     print(f"  Amount           : {result.amount} ETB")
-    print(f"  Date             : {result.date}")
-    print(f"  Reference        : {result.reference}")
-    print(f"  Reason / Service : {result.reason}")
+    print(f"  Date             : {result.transaction_date}")
+    print(f"  Reference        : {result.transaction_reference}")
+    print(f"  Reason / Service : {result.narrative}")
 
 
 if __name__ == "__main__":

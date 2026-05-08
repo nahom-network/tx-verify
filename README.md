@@ -20,14 +20,14 @@ Python 3.10+ does.
 
 | Provider          | Function            | Input (example)                              | Result type                |
 | ----------------- | ------------------- | -------------------------------------------- | -------------------------- |
-| CBE               | `verify_cbe()`      | `"FT23062669JJ"`, `"12345678"` (8-digit suffix) | `VerifyResult`             |
-| Telebirr          | `verify_telebirr()` | `"CE12345678"` (10-char alphanumeric)        | `TelebirrReceipt \| None`   |
-| Dashen Bank       | `verify_dashen()`   | `"1234567890123456"` (16 digits)             | `DashenVerifyResult`       |
-| Bank of Abyssinia | `verify_abyssinia()`| `"FT23062669JJ"`, `"90172"` (5-digit suffix)   | `AbyssiniaVerifyResult`    |
-| CBE Birr          | `verify_cbe_birr()` | `"AB1234CD56"`, `"0911234567"` (local phone)   | `CBEBirrReceipt \| CBEBirrError` |
-| M-Pesa            | `verify_mpesa()`    | `"UE20VG1GS8"` (10-char alphanumeric)        | `MpesaVerifyResult`        |
+| CBE               | `verify_cbe()`      | `"FT23062669JJ"`, `"12345678"` (8-digit suffix) | `TransactionResult`        |
+| Telebirr          | `verify_telebirr()` | `"CE12345678"` (10-char alphanumeric)        | `TransactionResult`        |
+| Dashen Bank       | `verify_dashen()`   | `"1234567890123456"` (16 digits)             | `TransactionResult`        |
+| Bank of Abyssinia | `verify_abyssinia()`| `"FT23062669JJ"`, `"90172"` (5-digit suffix)   | `TransactionResult`        |
+| CBE Birr          | `verify_cbe_birr()` | `"AB1234CD56"`, `"0911234567"` (local phone)   | `TransactionResult`        |
+| M-Pesa            | `verify_mpesa()`    | `"UE20VG1GS8"` (10-char alphanumeric)        | `TransactionResult`        |
 | Image (Mistral)   | `verify_image()`    | `image_bytes` (JPEG/PNG)                     | `ImageVerifyResult`        |
-| Universal         | `verify_universal()`| Auto-routes by reference format              | `UniversalResult`          |
+| Universal         | `verify_universal()`| Auto-routes by reference format              | `TransactionResult`        |
 
 ---
 
@@ -56,14 +56,14 @@ from tx_verify import verify_telebirr, verify_cbe
 
 async def main():
     # --- Telebirr ---
-    receipt = await verify_telebirr("CE12345678")
-    if receipt is not None:
-        print(receipt.payer_name, receipt.settled_amount)
+    result = await verify_telebirr("CE12345678")
+    if result.success:
+        print(result.payer_name, result.amount)
 
     # --- CBE ---
     result = await verify_cbe("FT23062669JJ", "12345678")
     if result.success:
-        print(f"Paid {result.amount} ETB to {result.receiver}")
+        print(f"Paid {result.amount} ETB to {result.receiver_name}")
 
 asyncio.run(main())
 ```
@@ -82,16 +82,16 @@ positional argument.
 from tx_verify import verify_cbe
 
 result = await verify_cbe("FT23062669JJ", "12345678")
-# result.success          → bool
-# result.payer            → str | None
-# result.payer_account    → str | None
-# result.receiver         → str | None
-# result.receiver_account → str | None
-# result.amount           → float | None
-# result.date             → datetime | None
-# result.reference        → str | None
-# result.reason           → str | None
-# result.error            → str | None
+# result.success               → bool
+# result.payer_name            → str | None
+# result.payer_account         → str | None
+# result.receiver_name         → str | None
+# result.receiver_account      → str | None
+# result.amount                → float | None
+# result.transaction_date      → datetime | None
+# result.transaction_reference → str | None
+# result.narrative             → str | None
+# result.error                 → str | None
 ```
 
 The verifier fetches a PDF receipt from CBE servers, extracts text with
@@ -102,27 +102,26 @@ The verifier fetches a PDF receipt from CBE servers, extracts text with
 ### Telebirr
 
 Telebirr references are **10-character alphanumeric** codes. The verifier
-scrapes the public Ethio Telecom receipt page and returns a `TelebirrReceipt`
-dataclass.  On failure it returns `None`.
+scrapes the public Ethio Telecom receipt page and returns a `TransactionResult`.
+On failure it returns a result with `success=False`.
 
 ```python
 from tx_verify import verify_telebirr
 
-receipt = await verify_telebirr("CE12345678")
-if receipt is not None:
-    print(receipt.payer_name)               # str
-    print(receipt.payer_telebirr_no)        # str
-    print(receipt.credited_party_name)      # str
-    print(receipt.credited_party_account_no)# str
-    print(receipt.transaction_status)       # str
-    print(receipt.receipt_no)               # str
-    print(receipt.payment_date)             # str
-    print(receipt.settled_amount)           # str
-    print(receipt.service_fee)              # str
-    print(receipt.service_fee_vat)          # str
-    print(receipt.total_paid_amount)        # str
-    print(receipt.bank_name)                # str
-    print(receipt.meta)                     # dict
+result = await verify_telebirr("CE12345678")
+if result.success:
+    print(result.payer_name)            # str | None
+    print(result.payer_account)         # str | None
+    print(result.receiver_name)         # str | None
+    print(result.receiver_account)      # str | None
+    print(result.transaction_status)    # str | None
+    print(result.receipt_number)        # str | None
+    print(result.transaction_date)      # datetime | None
+    print(result.amount)                # float | None
+    print(result.service_charge)        # float | None
+    print(result.vat)                   # float | None
+    print(result.total_amount)          # float | None
+    print(result.meta)                  # dict
 ```
 
 `TelebirrVerificationError` may be raised when a proxy returns an explicit
@@ -141,29 +140,19 @@ from tx_verify import verify_dashen
 
 result = await verify_dashen("1234567890123456")
 # result.success               → bool
-# result.sender_name           → str | None
-# result.sender_account_number → str | None
-# result.transaction_channel   → str | None
-# result.service_type          → str | None
+# result.payer_name            → str | None
+# result.payer_account         → str | None
+# result.payment_channel       → str | None
+# result.transaction_type      → str | None
 # result.narrative             → str | None
 # result.receiver_name         → str | None
-# result.receiver_account_number → str | None
-# result.institution_name      → str | None
+# result.receiver_account      → str | None
 # result.transaction_reference → str | None
-# result.transfer_reference    → str | None
 # result.transaction_date      → datetime | None
-# result.transaction_amount    → float | None
+# result.amount                → float | None
 # result.service_charge        → float | None
-# result.excise_tax            → float | None
-# result.drrf_fee              → float | None
 # result.vat                   → float | None
-# result.penalty_fee           → float | None
-# result.income_tax_fee        → float | None
-# result.tax                   → float | None
-# result.interest_fee          → float | None
-# result.stamp_duty            → float | None
-# result.discount_amount       → float | None
-# result.total                 → float | None
+# result.total_amount          → float | None
 # result.amount_in_words       → str | None
 # result.meta                  → dict[str, Any]
 # result.error                 → str | None
@@ -181,25 +170,23 @@ rather than a PDF, so parsing is done directly from the API response.
 from tx_verify import verify_abyssinia
 
 result = await verify_abyssinia("FT23062669JJ", "90172")
-# result.success                    → bool
-# result.transaction_reference      → str | None
-# result.payer_name                 → str | None
-# result.payer_account              → str | None
-# result.receiver_name              → str | None
-# result.receiver_account           → str | None
-# result.transferred_amount         → float | None
-# result.total_amount_including_vat → float | None
-# result.vat                        → float | None
-# result.service_charge             → float | None
-# result.currency                   → str | None
-# result.transaction_type           → str | None
-# result.narrative                  → str | None
-# result.transaction_date           → datetime | None
-# result.transferred_amount_in_words → str | None
-# result.address                    → str | None
-# result.phone                      → str | None
-# result.meta                       → dict[str, Any]
-# result.error                      → str | None
+# result.success               → bool
+# result.transaction_reference → str | None
+# result.payer_name            → str | None
+# result.payer_account         → str | None
+# result.receiver_name         → str | None
+# result.receiver_account      → str | None
+# result.amount                → float | None
+# result.total_amount          → float | None
+# result.vat                   → float | None
+# result.service_charge        → float | None
+# result.currency              → str | None
+# result.transaction_type      → str | None
+# result.narrative             → str | None
+# result.transaction_date      → datetime | None
+# result.amount_in_words       → str | None
+# result.meta                  → dict[str, Any]
+# result.error                 → str | None
 ```
 
 ---
@@ -214,31 +201,28 @@ digits long (e.g. `0911234567`).
 from tx_verify import verify_cbe_birr
 
 result = await verify_cbe_birr("AB1234CD56", "0911234567")
-# result is either CBEBirrReceipt or CBEBirrError
-
-# On success:
-# result.customer_name      → str
-# result.debit_account      → str
-# result.credit_account     → str
-# result.receiver_name      → str
-# result.order_id           → str
-# result.transaction_status → str
-# result.receipt_number     → str
-# result.transaction_date   → str
-# result.amount             → str
-# result.paid_amount        → str
-# result.service_charge     → str
-# result.vat                → str
-# result.total_paid_amount  → str
-# result.payment_reason     → str
-# result.payment_channel    → str
+# result.success            → bool
+# result.payer_name         → str | None
+# result.payer_account      → str | None
+# result.receiver_account   → str | None
+# result.receiver_name      → str | None
+# result.transaction_reference → str | None
+# result.transaction_status → str | None
+# result.receipt_number     → str | None
+# result.transaction_date   → datetime | None
+# result.amount             → float | None
+# result.service_charge     → float | None
+# result.vat                → float | None
+# result.total_amount       → float | None
+# result.narrative          → str | None
+# result.payment_channel    → str | None
 # result.meta               → dict
 ```
 
-On failure the function returns a `CBEBirrError` object:
+On failure `result.success` is `False` and `result.error` contains the reason:
 
 ```python
-if isinstance(result, CBEBirrError):
+if not result.success:
     print(result.error)
 ```
 
@@ -254,21 +238,21 @@ parses it.
 from tx_verify import verify_mpesa
 
 result = await verify_mpesa("UE20VG1GS8")
-# result.success         → bool
-# result.transaction_id  → str | None
-# result.receipt_no      → str | None
-# result.payment_date    → datetime | None
-# result.amount          → float | None
-# result.service_fee     → float | None
-# result.vat             → float | None
-# result.payer_name      → str | None
-# result.payer_account   → str | None
-# result.payment_method  → str | None
-# result.transaction_type → str | None
-# result.payment_channel → str | None
-# result.amount_in_words → str | None
-# result.meta            → dict
-# result.error           → str | None
+# result.success               → bool
+# result.transaction_reference → str | None
+# result.receipt_number        → str | None
+# result.transaction_date      → datetime | None
+# result.amount                → float | None
+# result.service_charge        → float | None
+# result.vat                   → float | None
+# result.payer_name            → str | None
+# result.payer_account         → str | None
+# result.payment_method        → str | None
+# result.transaction_type      → str | None
+# result.payment_channel       → str | None
+# result.amount_in_words       → str | None
+# result.meta                  → dict
+# result.error                 → str | None
 ```
 
 ---
@@ -298,7 +282,7 @@ info = await verify_image(
     account_suffix="12345678",
 )
 print(info.verified)    # bool | None
-print(info.details)     # TelebirrReceipt | VerifyResult | None
+print(info.details)     # TransactionResult | None
 ```
 
 Requires the `MISTRAL_API_KEY` environment variable. The `mistralai` package
@@ -332,11 +316,11 @@ result = await verify_universal("FT23062669JJ", suffix="12345678")
 # CBE Birr — pass a local phone number
 result = await verify_universal("AB1234CD56", phone_number="0911234567")
 
-# The wrapper always returns a UniversalResult
-print(result.success)   # bool
-print(result.data)      # underlying provider result (or None)
-print(result.error)     # str | None
-print(result.details)   # str | None
+# The wrapper always returns a TransactionResult
+print(result.success)              # bool
+print(result.transaction_reference) # str | None
+print(result.error)                # str | None
+print(result.meta)                 # dict | None
 ```
 
 ---
@@ -399,13 +383,10 @@ underlying provider automatically.
 
 ## Error Handling
 
-Most verifiers return **result objects** rather than raising for expected
-failures (network errors, missing receipts, parsing failures).  Inspect
-`result.success` and `result.error`.
+All verifiers return a `TransactionResult` with `success` and `error` fields.
+Inspect `result.success` and `result.error` for expected failures (network
+errors, missing receipts, parsing failures).
 
-- `verify_telebirr` returns `None` when the receipt cannot be fetched or
-  validated.
-- `verify_cbe_birr` returns a `CBEBirrError` object on failure.
 - `TelebirrVerificationError` may be raised for proxy-level errors.  Catch it
   if you want to show the user a friendly message:
 
@@ -413,8 +394,8 @@ failures (network errors, missing receipts, parsing failures).  Inspect
 from tx_verify import TelebirrVerificationError, verify_telebirr
 
 try:
-    receipt = await verify_telebirr("INVALID_REF")
-    if receipt is None:
+    result = await verify_telebirr("INVALID_REF")
+    if not result.success:
         print("Receipt not found.")
 except TelebirrVerificationError as exc:
     print(f"Telebirr error: {exc}")
