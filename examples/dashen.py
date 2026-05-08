@@ -13,7 +13,7 @@ from tx_verify import verify_dashen
 
 async def main() -> None:
     # Replace with a real Dashen transaction reference
-    reference = "387WDTS252140001"
+    reference = "641OBTS2518100WH"
 
     result = await verify_dashen(reference)
 
@@ -23,7 +23,7 @@ async def main() -> None:
 
     print("✅ Dashen Bank receipt verified:")
     for key, value in asdict(result).items():
-        print(f"   {key}: {value}")
+        print(f"   {' '.join(key.capitalize().split('_'))}: {value}")
 
 
 if __name__ == "__main__":

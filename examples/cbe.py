@@ -6,30 +6,25 @@ The bank returns a PDF receipt that is parsed automatically.
 """
 
 import asyncio
+from dataclasses import asdict
 
 from tx_verify import verify_cbe
 
 
 async def main() -> None:
     # Replace with real values from the CBE receipt
-    reference = "FT23062669JJ"
-    account_suffix = "12345678"  # last 8 digits of the account
+    reference = "FT26125ZD8XR84722688"
+    # account_suffix = "12345678"  # last 8 digits of the account
 
-    result = await verify_cbe(reference, account_suffix)
+    result = await verify_cbe(reference)
 
     if not result.success:
         print(f"❌ Verification failed: {result.error}")
         return
 
     print("✅ CBE receipt verified:")
-    print(f"  Payer            : {result.payer_name}")
-    print(f"  Payer Account    : {result.payer_account}")
-    print(f"  Receiver         : {result.receiver_name}")
-    print(f"  Receiver Account : {result.receiver_account}")
-    print(f"  Amount           : {result.amount} ETB")
-    print(f"  Date             : {result.transaction_date}")
-    print(f"  Reference        : {result.transaction_reference}")
-    print(f"  Reason / Service : {result.narrative}")
+    for key, value in asdict(result).items():
+        print(f"   {' '.join(key.capitalize().split('_'))}: {value}")
 
 
 if __name__ == "__main__":

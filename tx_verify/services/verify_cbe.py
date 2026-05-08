@@ -66,54 +66,158 @@ async def verify_cbe(
         )
 
 
+def _extract_text(pdf_bytes: bytes) -> str:
+    """Extract and normalise text from a CBE PDF."""
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    raw_text = ""
+    for page in reader.pages:
+        raw_text += page.extract_text() or ""
+    # Normalise horizontal whitespace but preserve line breaks for structure.
+    return re.sub(r"[^\S\n]+", " ", raw_text).strip()
+
+
+def _extract_value(lines: list[str], label: str) -> str | None:
+    """Return the value paired with *label* in a two-column CBE section.
+
+    CBE PDFs emit all labels first, then all values.  We count how many
+    colon-ending labels appear before *label* and use that as the index
+    into the list of non-label lines.
+    """
+    label_low = label.lower()
+    labels_before = 0
+    for line in lines:
+        if line.lower().rstrip(":") == label_low:
+            break
+        if line.endswith(":"):
+            labels_before += 1
+    else:
+        return None
+
+    values = [line for line in lines if not line.endswith(":")]
+    if labels_before < len(values):
+        val = values[labels_before]
+        return val if val != "_" else None
+    return None
+
+
+def _extract_meta(text: str) -> dict[str, object]:
+    """Extract optional CBE metadata (branch, region, tin)."""
+    meta: dict[str, object] = {}
+
+    bank_match = re.search(
+        r"Company Address & Other Information\s*\n(.*?)\n\s*Customer Information",
+        text,
+        re.S | re.I,
+    )
+    if bank_match:
+        bank_lines = [line.strip() for line in bank_match.group(1).split("\n") if line.strip()]
+        tin = _extract_value(bank_lines, "Tin")
+        if tin:
+            meta["tin"] = tin
+
+    customer_match = re.search(
+        r"Customer Information\s*\n(.*?)\n\s*Payment / Transaction Information",
+        text,
+        re.S | re.I,
+    )
+    if customer_match:
+        customer_lines = [
+            line.strip() for line in customer_match.group(1).split("\n") if line.strip()
+        ]
+        branch = _extract_value(customer_lines, "Branch")
+        if not branch:
+            # CBE PDFs occasionally drop placeholder values ("_"), shifting
+            # later values up.  The branch name is almost always the final
+            # non-label line in the customer section.
+            values = [line for line in customer_lines if not line.endswith(":")]
+            if values:
+                branch = values[-1]
+        if branch:
+            meta["branch"] = branch
+        region = _extract_value(customer_lines, "Region")
+        if region:
+            meta["region"] = region
+
+    return meta
+
+
 def _parse_cbe_receipt(pdf_bytes: bytes) -> TransactionResult:
     """Extract transaction fields from a CBE PDF receipt."""
     try:
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        raw_text = ""
-        for page in reader.pages:
-            raw_text += page.extract_text() or ""
+        text = _extract_text(pdf_bytes)
 
-        # Normalise whitespace
-        raw_text = re.sub(r"\s+", " ", raw_text).strip()
-
-        payer_match = re.search(r"Payer\s*:?\s*(.*?)\s+Account", raw_text, re.I)
+        payer_match = re.search(r"Payer\s*:?\s*(.*?)\s+Account", text, re.I)
         payer_name = payer_match.group(1).strip() if payer_match else None
 
-        receiver_match = re.search(r"Receiver\s*:?\s*(.*?)\s+Account", raw_text, re.I)
+        receiver_match = re.search(r"Receiver\s*:?\s*(.*?)\s+Account", text, re.I)
         receiver_name = receiver_match.group(1).strip() if receiver_match else None
 
-        account_matches = re.findall(r"Account\s*:?\s*([A-Z0-9]?\*{4}\d{4})", raw_text, re.I)
+        account_matches = re.findall(r"Account\s*:?\s*([A-Z0-9]?\*{4}\d{4})", text, re.I)
         payer_account = account_matches[0] if len(account_matches) > 0 else None
         receiver_account = account_matches[1] if len(account_matches) > 1 else None
 
         reason_match = re.search(
             r"Reason\s*/\s*Type of service\s*:?\s*(.*?)\s+Transferred Amount",
-            raw_text,
+            text,
             re.I,
         )
         reason = reason_match.group(1).strip() if reason_match else None
 
-        amount_match = re.search(r"Transferred Amount\s*:?\s*([\d,]+\.\d{2})\s*ETB", raw_text, re.I)
+        amount_match = re.search(r"Transferred Amount\s*:?\s*([\d,]+\.\d{2})\s*ETB", text, re.I)
         amount_text = amount_match.group(1) if amount_match else None
+
+        service_charge_match = re.search(
+            r"Commission or Service Charge\s*:?\s*([\d,]+\.\d{2})\s*ETB", text, re.I
+        )
+        service_charge_text = service_charge_match.group(1) if service_charge_match else None
+
+        vat_match = re.search(r"VAT on Commission\s*:?\s*([\d,]+\.\d{2})\s*ETB", text, re.I)
+        vat_text = vat_match.group(1) if vat_match else None
+
+        total_match = re.search(
+            r"Total amount debited from customers account\s*:?\s*([\d,]+\.\d{2})\s*ETB",
+            text,
+            re.I,
+        )
+        total_text = total_match.group(1) if total_match else None
+
+        words_match = re.search(r"Amount in Word\s*:?\s*ETB\s*(.*?)\s*cents", text, re.I)
+        amount_in_words = words_match.group(1).strip() if words_match else None
 
         ref_match = re.search(
             r"Reference No\.?\s*\(VAT Invoice No\)\s*:?\s*([A-Z0-9]+)",
-            raw_text,
+            text,
             re.I,
         )
         reference_val = ref_match.group(1).strip() if ref_match else None
 
-        date_match = re.search(r"Payment Date & Time\s*:?\s*([\d/,: ]+[APM]{2})", raw_text, re.I)
+        date_match = re.search(r"Payment Date & Time\s*:?\s*([\d/,: ]+[APM]{2})", text, re.I)
         date_raw = date_match.group(1).strip() if date_match else None
 
         amount = float(amount_text.replace(",", "")) if amount_text else None
+        service_charge = (
+            float(service_charge_text.replace(",", "")) if service_charge_text else None
+        )
+        vat = float(vat_text.replace(",", "")) if vat_text else None
+        total_amount = float(total_text.replace(",", "")) if total_text else None
         date = _parse_date(date_raw) if date_raw else None
 
         if payer_name:
             payer_name = _title_case(payer_name)
         if receiver_name:
             receiver_name = _title_case(receiver_name)
+
+        # Infer payment channel from narrative when possible.
+        payment_channel = None
+        if reason:
+            if "mobile" in reason.lower():
+                payment_channel = "Mobile"
+            elif "internet" in reason.lower() or "online" in reason.lower():
+                payment_channel = "Internet Banking"
+            elif "branch" in reason.lower():
+                payment_channel = "Branch"
+
+        meta = _extract_meta(text)
 
         if (
             payer_name
@@ -135,6 +239,13 @@ def _parse_cbe_receipt(pdf_bytes: bytes) -> TransactionResult:
                 transaction_date=date,
                 transaction_reference=reference_val,
                 narrative=reason,
+                currency="ETB",
+                service_charge=service_charge,
+                vat=vat,
+                total_amount=total_amount,
+                amount_in_words=f"ETB {amount_in_words} cents" if amount_in_words else None,
+                payment_channel=payment_channel,
+                meta=meta,
             )
         else:
             return TransactionResult(

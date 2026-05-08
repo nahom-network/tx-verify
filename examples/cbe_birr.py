@@ -7,14 +7,15 @@ The service fetches a PDF receipt and extracts transaction details.
 """
 
 import asyncio
+from dataclasses import asdict
 
 from tx_verify import verify_cbe_birr
 
 
 async def main() -> None:
     # Replace with real values
-    receipt_number = "DE321C747J2"
-    phone_number = "0910544594"
+    receipt_number = "DE321C747K7"
+    phone_number = "0912345678"
 
     result = await verify_cbe_birr(receipt_number, phone_number)
 
@@ -23,17 +24,8 @@ async def main() -> None:
         return
 
     print("✅ CBE Birr receipt verified:")
-    print(f"  Customer Name    : {result.payer_name}")
-    print(f"  Receiver Name    : {result.receiver_name}")
-    print(f"  Order ID         : {result.transaction_reference}")
-    print(f"  Receipt Number   : {result.receipt_number}")
-    print(f"  Transaction Date : {result.transaction_date}")
-    print(f"  Amount           : {result.amount}")
-    print(f"  Service Charge   : {result.service_charge}")
-    print(f"  VAT              : {result.vat}")
-    print(f"  Total Paid       : {result.total_amount}")
-    print(f"  Payment Reason   : {result.narrative}")
-    print(f"  Payment Channel  : {result.payment_channel}")
+    for key, value in asdict(result).items():
+        print(f"   {' '.join(key.capitalize().split('_'))}: {value}")
 
 
 if __name__ == "__main__":

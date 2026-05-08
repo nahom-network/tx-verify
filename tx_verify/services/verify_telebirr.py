@@ -111,8 +111,8 @@ def _match_label(line: str) -> str | None:
 
 
 def _parse_amount(value: str) -> float | None:
-    """Parse a numeric amount string like '1,000.00' or '100 ETB'."""
-    cleaned = value.replace(",", "").replace("ETB", "").strip()
+    """Parse a numeric amount string like '1,000.00', '100 ETB' or '100 Birr'."""
+    cleaned = value.replace(",", "").replace("ETB", "").replace("Birr", "").strip()
     with suppress(ValueError):
         return float(cleaned)
     return None

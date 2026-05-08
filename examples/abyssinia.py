@@ -12,7 +12,7 @@ from tx_verify import verify_abyssinia
 
 async def main() -> None:
     # Replace with real values
-    reference = "FT23062669JJ"
+    reference = "FT260903SZJW02117"
     suffix = "90172"  # last 5 digits of the account
 
     result = await verify_abyssinia(reference, suffix)
