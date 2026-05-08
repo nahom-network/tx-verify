@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.0.2 (2026-05-08)
+
+### Bug Fixes
+
+- **dependencies**: Remove outdated dependencies from pyproject.toml
+  ([`81b9b0d`](https://github.com/nahom-network/tx-verify/commit/81b9b0d1a7e918771489d9513579c9a8efc51522))
+
+
 ## v1.0.1 (2026-05-08)
 
 ### Bug Fixes
