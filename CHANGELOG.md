@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v1.0.1 (2026-05-08)
+
+### Bug Fixes
+
+- **project**: Update URLs to point to the correct repository
+  ([`f8c1059`](https://github.com/nahom-network/tx-verify/commit/f8c105901e4d0eea2a4d4866719986816766e6d4))
+
+
 ## v1.0.0 (2026-05-07)
 
 ### Bug Fixes
